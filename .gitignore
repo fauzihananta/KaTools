@@ -1,0 +1,13 @@
+# Build outputs
+*.exe
+*.obj
+*.zip
+*.syso
+
+# Runtime state and logs
+katools_config.json
+katools_ocr.log
+katools_ocr.previous.log
+
+# Locally captured screenshots
+ScreenshotWGC/
