@@ -151,10 +151,13 @@ func main() {
 	// New areas are hidden again immediately after the picker saves them.
 	_ = hideROIConfigFiles()
 
-	startWebUI(runtimeManager)
+	if err := startWebView2UI(runtimeManager); err != nil {
+		fmt.Println("KaTools UI error:", err)
+	}
 
-	// Runtime dikontrol penuh dari Web UI.
-	select {}
+	// The native WebView2 window returns only after it has closed. Keep the
+	// existing runtime cleanup path for a normal close.
+	runtimeManager.Stop()
 }
 
 func enablePerMonitorDPIAwareness() {

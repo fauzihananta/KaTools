@@ -2737,9 +2737,12 @@ func (a *AutoAcceptController) SetEnabled(
 // WEB UI
 // ============================================================
 
-func startWebUI(
+// newWebUIMux keeps every existing web route in one handler. The desktop shell
+// proxies its internal WebView2 requests to this mux, so the UI and bot API
+// retain the same behaviour without opening Firefox or another browser.
+func newWebUIMux(
 	runtimeManager *RuntimeManager,
-) {
+) http.Handler {
 
 	mux := http.NewServeMux()
 	var exitOnce sync.Once
@@ -3534,49 +3537,7 @@ func startWebUI(
 		},
 	)
 
-	// ========================================================
-	// SERVER
-	// ========================================================
-
-	go func() {
-
-		fmt.Println(
-			"========================================",
-		)
-
-		fmt.Println(
-			"KaTools Web UI",
-		)
-
-		fmt.Println(
-			"========================================",
-		)
-
-		fmt.Println(
-			"Listening on http://127.0.0.1:8787",
-		)
-
-		fmt.Println()
-
-		err :=
-			http.ListenAndServe(
-				"127.0.0.1:8787",
-				mux,
-			)
-
-		if err != nil {
-
-			fmt.Println(
-				"Web server error:",
-				err,
-			)
-		}
-
-	}()
-
-	go openBrowser(
-		"http://127.0.0.1:8787",
-	)
+	return mux
 }
 
 // ============================================================
