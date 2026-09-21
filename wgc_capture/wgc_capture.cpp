@@ -34,10 +34,12 @@ static const uint32_t SHARED_MEMORY_MAGIC =
     0x4B544652; // "KTFR"
 
 // KaTools only needs fresh frames for UI detection, not video-quality capture.
-// Keeping the capture at 15 FPS substantially reduces GPU->CPU copies and
-// shared-memory writes on battery while retaining responsive popup detection.
-static const DWORD CAPTURE_FPS = 15;
-static const DWORD CAPTURE_FRAME_INTERVAL_MS = 1000 / CAPTURE_FPS;
+// Ten frames per second is sufficient for the 100-120 ms UI scanners in the
+// Go runtime. The Go launcher can request one FPS for key-only bot profiles,
+// where capture only keeps the low-priority disconnect monitor active.
+static const DWORD DEFAULT_CAPTURE_FPS = 10;
+static const DWORD MIN_CAPTURE_FPS = 1;
+static const DWORD MAX_CAPTURE_FPS = 10;
 
 
 #pragma pack(push, 1)
@@ -68,15 +70,22 @@ struct SharedFrameHeader
 // IDirect3DDxgiInterfaceAccess
 // ============================================================
 
-struct __declspec(uuid(
-    "A9B3D012-3DF2-4EE3-B8D1-8695F457D3C1"
-))
-IDirect3DDxgiInterfaceAccess : public IUnknown
+struct IDirect3DDxgiInterfaceAccess : public IUnknown
 {
     virtual HRESULT STDMETHODCALLTYPE GetInterface(
         REFIID iid,
         void** p
     ) = 0;
+};
+
+// Keep the IID explicit instead of depending on compiler-specific uuidof
+// support. The capture helper can then be built with both MSVC and MinGW.
+static const GUID IID_IDirect3DDxgiInterfaceAccess =
+{
+    0xA9B3D012,
+    0x3DF2,
+    0x4EE3,
+    { 0xB8, 0xD1, 0x86, 0x95, 0xF4, 0x57, 0xD3, 0xC1 }
 };
 
 
@@ -438,9 +447,11 @@ bool WriteFrameToSharedMemory(
 bool CaptureWindow(
     HWND hwnd,
     ID3D11Device* device,
-    ID3D11DeviceContext* context
+    ID3D11DeviceContext* context,
+    DWORD captureFPS
 )
 {
+    const DWORD frameIntervalMs = 1000 / captureFPS;
     std::cout
         << std::endl
         << "------------------------------------"
@@ -768,6 +779,12 @@ bool CaptureWindow(
 
     uint64_t localFrameCount = 0;
 
+    // A staging texture owns a full copy of the captured game frame. Creating
+    // and destroying one for every frame forces needless GPU allocations and
+    // driver work. Reuse it until the capture format or dimensions change.
+    ComPtr<ID3D11Texture2D> stagingTexture;
+    D3D11_TEXTURE2D_DESC stagingDesc = {};
+
     while (true)
     {
         const ULONGLONG frameStartedAt = GetTickCount64();
@@ -807,7 +824,9 @@ bool CaptureWindow(
         if (FAILED(hr) ||
             !frame)
         {
-            Sleep(2);
+            // Avoid a high-frequency polling loop while a frame is not ready
+            // (for example when the game is minimized or idle).
+            Sleep(15);
 
             continue;
         }
@@ -848,8 +867,11 @@ bool CaptureWindow(
         > access;
 
         hr =
-            surface.As(
-                &access
+            surface->QueryInterface(
+                IID_IDirect3DDxgiInterfaceAccess,
+                reinterpret_cast<void**>(
+                    access.GetAddressOf()
+                )
             );
 
         if (FAILED(hr))
@@ -877,8 +899,9 @@ bool CaptureWindow(
 
         hr =
             access->GetInterface(
-                IID_PPV_ARGS(
-                    &sourceTexture
+                IID_ID3D11Texture2D,
+                reinterpret_cast<void**>(
+                    sourceTexture.GetAddressOf()
                 )
             );
 
@@ -906,45 +929,56 @@ bool CaptureWindow(
         );
 
         // ----------------------------------------------------
-        // Create staging texture
+        // Create or reuse the CPU-readable staging texture.
         // ----------------------------------------------------
 
-        D3D11_TEXTURE2D_DESC stagingDesc =
-            desc;
+        const bool stagingNeedsRecreate =
+            !stagingTexture ||
+            stagingDesc.Width != desc.Width ||
+            stagingDesc.Height != desc.Height ||
+            stagingDesc.MipLevels != desc.MipLevels ||
+            stagingDesc.ArraySize != desc.ArraySize ||
+            stagingDesc.Format != desc.Format ||
+            stagingDesc.SampleDesc.Count != desc.SampleDesc.Count ||
+            stagingDesc.SampleDesc.Quality != desc.SampleDesc.Quality;
 
-        stagingDesc.Usage =
-            D3D11_USAGE_STAGING;
-
-        stagingDesc.BindFlags =
-            0;
-
-        stagingDesc.CPUAccessFlags =
-            D3D11_CPU_ACCESS_READ;
-
-        stagingDesc.MiscFlags =
-            0;
-
-        ComPtr<ID3D11Texture2D>
-            stagingTexture;
-
-        hr =
-            device->CreateTexture2D(
-                &stagingDesc,
-                nullptr,
-                &stagingTexture
-            );
-
-        if (FAILED(hr))
+        if (stagingNeedsRecreate)
         {
-            std::cout
-                << "Create staging texture failed."
-                << std::endl;
+            stagingDesc = desc;
 
-            DestroySharedMemory(
-                shm
-            );
+            stagingDesc.Usage =
+                D3D11_USAGE_STAGING;
 
-            return false;
+            stagingDesc.BindFlags =
+                0;
+
+            stagingDesc.CPUAccessFlags =
+                D3D11_CPU_ACCESS_READ;
+
+            stagingDesc.MiscFlags =
+                0;
+
+            stagingTexture.Reset();
+
+            hr =
+                device->CreateTexture2D(
+                    &stagingDesc,
+                    nullptr,
+                    &stagingTexture
+                );
+
+            if (FAILED(hr))
+            {
+                std::cout
+                    << "Create staging texture failed."
+                    << std::endl;
+
+                DestroySharedMemory(
+                    shm
+                );
+
+                return false;
+            }
         }
 
         // ----------------------------------------------------
@@ -1035,18 +1069,18 @@ bool CaptureWindow(
         }
 
         // ----------------------------------------------------
-        // Limit the expensive GPU->CPU copy and shared-memory write to 15 FPS.
+        // Limit the expensive GPU->CPU copy and shared-memory write to 10 FPS.
         // Account for the work already spent on this frame so the cap stays
-        // close to 15 FPS instead of being 15 FPS plus processing time.
+        // close to 10 FPS instead of being 10 FPS plus processing time.
         // ----------------------------------------------------
 
         const ULONGLONG elapsedMs =
             GetTickCount64() - frameStartedAt;
 
-        if (elapsedMs < CAPTURE_FRAME_INTERVAL_MS)
+        if (elapsedMs < frameIntervalMs)
         {
             Sleep(
-                CAPTURE_FRAME_INTERVAL_MS -
+                frameIntervalMs -
                 static_cast<DWORD>(elapsedMs)
             );
         }
@@ -1108,6 +1142,37 @@ bool ParseHWND(
 }
 
 
+DWORD ParseCaptureFPS(
+    int argc,
+    char* argv[]
+)
+{
+    for (int i = 1; i < argc; ++i)
+    {
+        if (std::string(argv[i]) != "--fps" || i + 1 >= argc)
+        {
+            continue;
+        }
+
+        try
+        {
+            const unsigned long raw = std::stoul(argv[++i]);
+            if (raw >= MIN_CAPTURE_FPS && raw <= MAX_CAPTURE_FPS)
+            {
+                return static_cast<DWORD>(raw);
+            }
+        }
+        catch (...)
+        {
+        }
+
+        break;
+    }
+
+    return DEFAULT_CAPTURE_FPS;
+}
+
+
 int main(
     int argc,
     char* argv[]
@@ -1133,6 +1198,7 @@ int main(
     // --------------------------------------------------------
 
     HWND hwnd = nullptr;
+    const DWORD captureFPS = ParseCaptureFPS(argc, argv);
 
     if (!ParseHWND(
         argc,
@@ -1145,7 +1211,7 @@ int main(
             << std::endl;
 
         std::cout
-            << "  wgc_capture.exe --hwnd 0x123456"
+            << "  wgc_capture.exe --hwnd 0x123456 [--fps 1..10]"
             << std::endl;
 
         return 1;
@@ -1285,7 +1351,8 @@ int main(
         CaptureWindow(
             hwnd,
             device.Get(),
-            context.Get()
+            context.Get(),
+            captureFPS
         );
 
     if (!result)

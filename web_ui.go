@@ -843,10 +843,15 @@ button:disabled:hover {
 
 				<div id="targetSkipNamesSettings" class="target-mode-settings" hidden>
 					<div class="target-name-card">
-						<label for="targetUntilDeadCharacterName">Skip Target Names</label>
+						<label>Target Name Filter</label>
+						<div class="target-mode-options">
+							<label class="target-mode-option"><input type="radio" name="targetNameFilterMode" value="skip" checked> Skip listed</label>
+							<label class="target-mode-option"><input type="radio" name="targetNameFilterMode" value="whitelist"> Only attack listed</label>
+						</div>
+						<label id="targetNameListLabel" for="targetUntilDeadCharacterName">Skip Target Names</label>
 						<input type="text" id="targetUntilDeadCharacterName" placeholder="Example: MangAep;Dadati" autocomplete="off">
 					</div>
-					<div class="hint">Optional for Target. Required for Target Until Dead. Separate names with a semicolon.</div>
+					<div id="targetNameListHint" class="hint">Optional for Target. Required for Target Until Dead. Separate names with a semicolon.</div>
 				</div>
 
 				<div id="targetUntilSettings" class="target-mode-settings" hidden>
@@ -1441,6 +1446,9 @@ function getConfig() {
 		targetUntilDeadCharacterName:
 			document.getElementById("targetUntilDeadCharacterName").value,
 
+		targetNameFilterMode:
+			getTargetNameFilterMode(),
+
 		targetDelay:
 			Number(document.getElementById("targetDelay").value),
 
@@ -1683,6 +1691,7 @@ function applySavedConfig(config) {
 	document.getElementById("targetDelay").value = config.targetDelay || "";
 	document.getElementById("targetUntilDeadCharacterName").value =
 		config.targetUntilDeadCharacterName || "";
+	setTargetNameFilterMode(config.targetNameFilterMode || "skip");
 	syncTargetMode();
 	document.getElementById("attack").checked = !!config.attackEnabled;
 	document.getElementById("attackDelay").value = config.attackDelay || "";
@@ -1878,7 +1887,7 @@ function updateWindowDependentControls() {
 
 	for (const selector of [
 		"input[name=targetMode]", "#assistSkillSlot", "#assistSkillDelay", "#targetDelay", "#attack", "#attackDelay", "#pick", "#pickDelay",
-		"#targetUntilDeadCharacterName", "input[name=targetUntilRole]", ".skill-check", ".skill-delay", ".support-skill-check", ".support-skill-delay", ".support-with-target-check", ".emergency-check", ".emergency-slot", ".emergency-needs-target", "#assistPanicTarget"
+		"#targetUntilDeadCharacterName", "input[name=targetUntilRole]", "input[name=targetNameFilterMode]", ".skill-check", ".skill-delay", ".support-skill-check", ".support-skill-delay", ".support-with-target-check", ".emergency-check", ".emergency-slot", ".emergency-needs-target", "#assistPanicTarget"
 	]) {
 		for (const control of document.querySelectorAll(selector)) {
 			control.disabled = !ready;
@@ -2136,6 +2145,26 @@ function setTargetMode(mode) {
 	if (radio && !radio.disabled) radio.checked = true;
 }
 
+function getTargetNameFilterMode() {
+	const selected = document.querySelector('input[name="targetNameFilterMode"]:checked');
+	return selected ? selected.value : "skip";
+}
+
+function setTargetNameFilterMode(mode) {
+	const value = mode === "whitelist" ? "whitelist" : "skip";
+	const radio = document.querySelector('input[name="targetNameFilterMode"][value="' + value + '"]');
+	if (radio) radio.checked = true;
+}
+
+function syncTargetNameFilterMode() {
+	const whitelist = getTargetNameFilterMode() === "whitelist";
+	document.getElementById("targetNameListLabel").textContent = whitelist ? "Whitelist Target Names" : "Skip Target Names";
+	document.getElementById("targetUntilDeadCharacterName").placeholder = whitelist ? "Example: Vasabhum;Zarku Rudhira" : "Example: MangAep;Dadati";
+	document.getElementById("targetNameListHint").textContent = whitelist
+		? "Only names on this list may be attacked. Required for Target and Target Until Dead. Separate names with a semicolon."
+		: "Optional for Target. Required for Target Until Dead. Separate names with a semicolon.";
+}
+
 function syncTargetMode() {
 	const windowReady = hasSelectedTargetWindow();
 	const untilRadio = document.getElementById("targetUntilDead");
@@ -2158,6 +2187,10 @@ function syncTargetMode() {
 	for (const role of document.querySelectorAll('input[name="targetUntilRole"]')) {
 		role.disabled = !windowReady || mode !== "until";
 	}
+	for (const filterMode of document.querySelectorAll('input[name="targetNameFilterMode"]')) {
+		filterMode.disabled = !windowReady || !usesSkipNames;
+	}
+	syncTargetNameFilterMode();
 	// Keep the saved Attack checkbox intact for Attacker mode, but do not allow
 	// R to compete with Support Skills while Support is selected.
 	document.getElementById("attack").disabled = !windowReady || supportMode;
@@ -2483,7 +2516,7 @@ document.addEventListener("input", function(event) {
 // Apply after a control's value is committed. In particular, number inputs
 // must not restart the scheduler while the user is still typing a value.
 document.addEventListener("change", function(event) {
-	if (event.target.name === "targetMode" || event.target.name === "targetUntilRole") {
+	if (event.target.name === "targetMode" || event.target.name === "targetUntilRole" || event.target.name === "targetNameFilterMode") {
 		syncTargetMode();
 	}
 	if (event.target.id === "autoPauseDeath") {
@@ -2527,6 +2560,7 @@ type WebBotConfig struct {
 	TargetUntilDeadEnabled       bool    `json:"targetUntilDeadEnabled"`
 	TargetUntilDeadSupport       bool    `json:"targetUntilDeadSupport"`
 	TargetUntilDeadCharacterName string  `json:"targetUntilDeadCharacterName"`
+	TargetNameFilterMode         string  `json:"targetNameFilterMode"`
 
 	TargetEnabled bool    `json:"targetEnabled"`
 	TargetDelay   float64 `json:"targetDelay"`
@@ -3288,11 +3322,16 @@ func newWebUIMux(
 			targetNameFilterEnabled := cfg.TargetUntilDeadEnabled ||
 				(cfg.TargetEnabled && strings.TrimSpace(cfg.TargetUntilDeadCharacterName) != "")
 			if targetNameFilterEnabled && !LoadTargetROI().Selected {
-				writeJSONError(w, "Select the target name and HP bar before using Skip Target Names or Target Until Dead.")
+				writeJSONError(w, "Select the target name and HP bar before using Target Name Filter or Target Until Dead.")
+				return
+			}
+			if normalizeTargetNameFilterMode(cfg.TargetNameFilterMode) == targetNameFilterModeWhitelist &&
+				(cfg.TargetEnabled || cfg.TargetUntilDeadEnabled) && strings.TrimSpace(cfg.TargetUntilDeadCharacterName) == "" {
+				writeJSONError(w, "Enter one or more whitelist target names before enabling Target or Target Until Dead.")
 				return
 			}
 			if cfg.TargetUntilDeadEnabled && strings.TrimSpace(cfg.TargetUntilDeadCharacterName) == "" {
-				writeJSONError(w, "Enter one or more skip target names before enabling Target Until Dead.")
+				writeJSONError(w, "Enter one or more target names before enabling Target Until Dead.")
 				return
 			}
 
@@ -3432,7 +3471,16 @@ func newWebUIMux(
 			if targetNameFilterEnabled && !LoadTargetROI().Selected {
 				writeJSONError(
 					w,
-					"Select the target name and HP bar before using Skip Target Names or Target Until Dead.",
+					"Select the target name and HP bar before using Target Name Filter or Target Until Dead.",
+				)
+				return
+			}
+
+			if normalizeTargetNameFilterMode(cfg.TargetNameFilterMode) == targetNameFilterModeWhitelist &&
+				(cfg.TargetEnabled || cfg.TargetUntilDeadEnabled) && strings.TrimSpace(cfg.TargetUntilDeadCharacterName) == "" {
+				writeJSONError(
+					w,
+					"Enter one or more whitelist target names before enabling Target or Target Until Dead.",
 				)
 				return
 			}
@@ -3440,7 +3488,7 @@ func newWebUIMux(
 			if cfg.TargetUntilDeadEnabled && strings.TrimSpace(cfg.TargetUntilDeadCharacterName) == "" {
 				writeJSONError(
 					w,
-					"Enter one or more skip target names before enabling Target Until Dead.",
+					"Enter one or more target names before enabling Target Until Dead.",
 				)
 				return
 			}
@@ -3615,7 +3663,13 @@ func applyWebBotConfig(
 	targetFilterEnabled := cfg.TargetUntilDeadEnabled ||
 		(cfg.TargetEnabled && strings.TrimSpace(cfg.TargetUntilDeadCharacterName) != "")
 	supportMode := cfg.TargetUntilDeadEnabled && cfg.TargetUntilDeadSupport
-	targetUntil.Update(cfg.TargetUntilDeadEnabled, targetFilterEnabled, supportMode, cfg.TargetUntilDeadCharacterName)
+	targetUntil.Update(
+		cfg.TargetUntilDeadEnabled,
+		targetFilterEnabled,
+		supportMode,
+		cfg.TargetUntilDeadCharacterName,
+		cfg.TargetNameFilterMode,
+	)
 	bot.SetTargetActionFilterEnabled(targetFilterEnabled)
 	bot.SetTargetActionReady(!targetFilterEnabled)
 	bot.SetTargetPanelClear(false)

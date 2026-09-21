@@ -52,6 +52,7 @@ func startWebView2UI(runtimeManager *RuntimeManager) error {
 			Title:  "KaTools",
 			Width:  kaToolsPanelWidth,
 			Height: 900,
+			IconId: 1,
 			Center: false,
 		},
 	})

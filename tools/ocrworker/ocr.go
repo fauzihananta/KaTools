@@ -1,6 +1,7 @@
 package ocrworker
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"image"
@@ -58,7 +59,11 @@ type OCR struct {
 }
 
 type Result struct {
-	Text         string
+	Text string
+	// Candidates contains the individual readings used for a compact target
+	// header. The caller can compare all preprocessing passes to configured
+	// names instead of trusting one pass polluted by a transparent HUD backdrop.
+	Candidates   []string
 	IsParty      bool
 	Duration     time.Duration
 	StatusHPText string
@@ -487,26 +492,25 @@ func cropImageRows(src image.Image, top, bottom int) image.Image {
 	return dst
 }
 
-// RunTargetNameImage reads one target-HUD header. Unlike a party dialog, this
-// is a compact HUD block, so PSM 6 is both faster and more reliable. Using
-// only the first two image variants avoids several seconds of Tesseract work
-// every time the bot changes target.
+// RunTargetNameImage reads one target-HUD header. Target names are rendered as
+// one compact line, so PSM 7 avoids treating bright scenery behind the
+// transparent HUD as extra words. The bright-glyph pass is tried first: unlike
+// a grayscale threshold, it retains only near-white UI text and therefore
+// remains stable when the camera moves behind the panel.
 func (o *OCR) RunTargetNameImage(img image.Image) (*Result, error) {
 	if img == nil {
 		return nil, fmt.Errorf("image is nil")
 	}
 
 	startTotal := time.Now()
-	variants := buildOCRVariants(img)
+	variants := targetNameOCRVariants(img)
 	var fallback string
+	var candidates []string
 	for i, variant := range variants {
-		if i >= 2 {
-			break
-		}
 		text, err := o.runTesseractImageWithOptions(
 			variant,
 			i,
-			"6",
+			"7",
 			"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 ",
 		)
 		if err != nil {
@@ -519,12 +523,109 @@ func (o *OCR) RunTargetNameImage(img image.Image) (*Result, error) {
 		if fallback == "" {
 			fallback = text
 		}
-		if targetNameTextHasLetters(text) {
-			return &Result{Text: text, Duration: time.Since(startTotal)}, nil
+		alreadySeen := false
+		for _, candidate := range candidates {
+			if candidate == text {
+				alreadySeen = true
+				break
+			}
+		}
+		if !alreadySeen {
+			candidates = append(candidates, text)
 		}
 	}
 
-	return &Result{Text: fallback, Duration: time.Since(startTotal)}, nil
+	return &Result{Text: fallback, Candidates: candidates, Duration: time.Since(startTotal)}, nil
+}
+
+// RunDisconnectImage is a small, fast OCR pass for Kathana's centered
+// connection-failed Message dialog. The caller supplies a tight center crop;
+// two complementary variants are enough and avoid the generic dialog OCR's
+// five-process fallback on every DC candidate.
+func (o *OCR) RunDisconnectImage(img image.Image) (*Result, error) {
+	if img == nil {
+		return nil, fmt.Errorf("image is nil")
+	}
+	startTotal := time.Now()
+	variants := buildOCRVariants(img)
+	var texts []string
+	for _, index := range []int{0, 2} {
+		if index >= len(variants) {
+			continue
+		}
+		text, err := o.runTesseractImageWithOptions(
+			variants[index], index, "6",
+			"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz ",
+		)
+		if err != nil {
+			continue
+		}
+		text = normalize(text)
+		if text == "" {
+			continue
+		}
+		duplicate := false
+		for _, previous := range texts {
+			if previous == text {
+				duplicate = true
+				break
+			}
+		}
+		if !duplicate {
+			texts = append(texts, text)
+		}
+	}
+	text := ""
+	if len(texts) > 0 {
+		text = texts[0]
+	}
+	return &Result{Text: text, Candidates: texts, Duration: time.Since(startTotal)}, nil
+}
+
+// targetNameOCRVariants puts a colour-aware mask ahead of grayscale fallbacks.
+// The target panel is semi-transparent; grayscale cannot distinguish white name
+// glyphs from a bright texture or effect shown behind the panel.
+func targetNameOCRVariants(img image.Image) []image.Image {
+	base := buildOCRVariants(img)
+	variants := []image.Image{
+		upscale3x(targetNameBrightGlyphImage(img)),
+	}
+	// Keep the historical grayscale image as a fallback for UI themes where the
+	// name glyphs are not pure white. Limiting this to two OCR passes keeps
+	// target validation responsive on slower PCs.
+	if len(base) > 0 {
+		variants = append(variants, base[0])
+	}
+	return variants
+}
+
+// targetNameBrightGlyphImage makes near-white, low-saturation HUD glyphs black
+// on white. Requiring all three channels to be bright removes coloured terrain,
+// the red HP bar, and most moving spell effects visible behind the HUD.
+func targetNameBrightGlyphImage(src image.Image) image.Image {
+	bounds := src.Bounds()
+	dst := image.NewGray(image.Rect(0, 0, bounds.Dx(), bounds.Dy()))
+	for y := 0; y < bounds.Dy(); y++ {
+		for x := 0; x < bounds.Dx(); x++ {
+			r, g, b, _ := src.At(bounds.Min.X+x, bounds.Min.Y+y).RGBA()
+			r8, g8, b8 := uint8(r>>8), uint8(g>>8), uint8(b>>8)
+			minValue, maxValue := r8, r8
+			for _, value := range []uint8{g8, b8} {
+				if value < minValue {
+					minValue = value
+				}
+				if value > maxValue {
+					maxValue = value
+				}
+			}
+			value := uint8(255)
+			if minValue >= 175 && maxValue-minValue <= 45 {
+				value = 0
+			}
+			dst.SetGray(x, y, color.Gray{Y: value})
+		}
+	}
+	return dst
 }
 
 func targetNameTextHasLetters(text string) bool {
@@ -861,55 +962,16 @@ func (o *OCR) runTesseractImageWithOptions(
 			)
 	}
 
-	tempFile, err :=
-		os.CreateTemp(
-			os.TempDir(),
-			fmt.Sprintf(
-				"katools_ocr_party_%d_*.png",
-				variant,
-			),
-		)
-
-	if err != nil {
-
-		return "",
-			fmt.Errorf(
-				"create temporary PNG: %w",
-				err,
-			)
-	}
-
-	tempPath := tempFile.Name()
-
-	defer os.Remove(tempPath)
-
-	if err :=
-		png.Encode(
-			tempFile,
-			img,
-		); err != nil {
-
-		_ = tempFile.Close()
-
-		return "",
-			fmt.Errorf(
-				"encode temporary PNG: %w",
-				err,
-			)
-	}
-
-	if err :=
-		tempFile.Close(); err != nil {
-
-		return "",
-			fmt.Errorf(
-				"close temporary PNG: %w",
-				err,
-			)
+	// Tesseract accepts PNG through stdin. Keeping each short-lived OCR image
+	// in memory avoids temp-file writes, antivirus scans, and filesystem churn
+	// for every OCR pass.
+	var pngData bytes.Buffer
+	if err := png.Encode(&pngData, img); err != nil {
+		return "", fmt.Errorf("encode OCR PNG: %w", err)
 	}
 
 	args := []string{
-		tempPath,
+		"stdin",
 		"stdout",
 		"--psm",
 		psm,
@@ -928,6 +990,7 @@ func (o *OCR) runTesseractImageWithOptions(
 	}
 
 	cmd := exec.Command(o.TesseractPath, args...)
+	cmd.Stdin = &pngData
 	// Tesseract is a console executable. KaTools invokes it repeatedly for OCR;
 	// without this flag Windows briefly creates a terminal window for every
 	// invocation when KaTools itself was launched without a console.

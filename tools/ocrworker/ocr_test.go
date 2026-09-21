@@ -2,6 +2,7 @@ package ocrworker
 
 import (
 	"image"
+	"image/color"
 	"testing"
 )
 
@@ -29,5 +30,19 @@ func TestStatusRowPairTextExtractsOneNumericPair(t *testing.T) {
 	}
 	if got := statusRowPairText("4228 4228"); got != "" {
 		t.Fatalf("row without slash = %q, want empty", got)
+	}
+}
+
+func TestTargetNameBrightGlyphImageRejectsColoredBackdrop(t *testing.T) {
+	src := image.NewRGBA(image.Rect(0, 0, 2, 1))
+	src.Set(0, 0, color.RGBA{R: 240, G: 238, B: 242, A: 255})
+	src.Set(1, 0, color.RGBA{R: 240, G: 120, B: 120, A: 255})
+
+	got := targetNameBrightGlyphImage(src)
+	if value := color.GrayModel.Convert(got.At(0, 0)).(color.Gray).Y; value != 0 {
+		t.Fatalf("near-white glyph = %d, want black foreground", value)
+	}
+	if value := color.GrayModel.Convert(got.At(1, 0)).(color.Gray).Y; value != 255 {
+		t.Fatalf("coloured backdrop = %d, want white background", value)
 	}
 }

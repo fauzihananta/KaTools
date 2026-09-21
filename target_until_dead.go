@@ -8,6 +8,9 @@ import (
 )
 
 const (
+	targetNameFilterModeSkip      = "skip"
+	targetNameFilterModeWhitelist = "whitelist"
+
 	// At 15 FPS, a target panel can miss a few capture frames while the game
 	// animates or redraws. Six scans (about 1.5 seconds) avoids changing a
 	// still-living target because of one brief visual dropout.
@@ -26,6 +29,7 @@ type TargetUntilDeadController struct {
 	filterEnabled bool // Name-based skill/attack gate for either target mode.
 	supportMode   bool // Hold non-With Target support slots until target is clear.
 	characterName string
+	filterMode    string
 	emptyScans    int
 	lastTargetAt  time.Time
 	// supportClearConfirmed is true only after targetEmptyConfirmScans absent
@@ -35,19 +39,21 @@ type TargetUntilDeadController struct {
 	retargetNotBefore     time.Time
 }
 
-func NewTargetUntilDeadController(enabled bool, filterEnabled bool, supportMode bool, characterName string) *TargetUntilDeadController {
+func NewTargetUntilDeadController(enabled bool, filterEnabled bool, supportMode bool, characterName, filterMode string) *TargetUntilDeadController {
 	return &TargetUntilDeadController{
 		enabled:       enabled,
 		filterEnabled: filterEnabled,
 		supportMode:   supportMode,
 		characterName: strings.TrimSpace(characterName),
+		filterMode:    normalizeTargetNameFilterMode(filterMode),
 	}
 }
 
-func (c *TargetUntilDeadController) Update(enabled bool, filterEnabled bool, supportMode bool, characterName string) {
+func (c *TargetUntilDeadController) Update(enabled bool, filterEnabled bool, supportMode bool, characterName, filterMode string) {
 	c.mu.Lock()
 	characterName = strings.TrimSpace(characterName)
-	if c.enabled != enabled || c.filterEnabled != filterEnabled || c.supportMode != supportMode || c.characterName != characterName {
+	filterMode = normalizeTargetNameFilterMode(filterMode)
+	if c.enabled != enabled || c.filterEnabled != filterEnabled || c.supportMode != supportMode || c.characterName != characterName || c.filterMode != filterMode {
 		c.emptyScans = 0
 		c.lastTargetAt = time.Time{}
 		c.supportClearConfirmed = false
@@ -57,6 +63,7 @@ func (c *TargetUntilDeadController) Update(enabled bool, filterEnabled bool, sup
 	c.filterEnabled = filterEnabled
 	c.supportMode = supportMode
 	c.characterName = characterName
+	c.filterMode = filterMode
 	c.mu.Unlock()
 }
 
@@ -64,6 +71,21 @@ func (c *TargetUntilDeadController) ExcludedNames() string {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.characterName
+}
+
+func (c *TargetUntilDeadController) IsWhitelistMode() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.filterMode == targetNameFilterModeWhitelist
+}
+
+// normalizeTargetNameFilterMode preserves existing skip behaviour for presets
+// that were saved before the filter-mode option existed.
+func normalizeTargetNameFilterMode(mode string) string {
+	if strings.EqualFold(strings.TrimSpace(mode), targetNameFilterModeWhitelist) {
+		return targetNameFilterModeWhitelist
+	}
+	return targetNameFilterModeSkip
 }
 
 func (c *TargetUntilDeadController) IsEnabled() bool {
@@ -190,9 +212,9 @@ func (c *TargetUntilDeadController) ForceRetarget() bool {
 }
 
 func targetTextMatchesExcludedName(text, names string) bool {
-	ocrWords := targetNameWords(text)
+	ocrWords := targetNameWordsWithoutHUD(text)
 	for _, name := range strings.Split(names, ";") {
-		nameWords := targetNameWords(name)
+		nameWords := targetNameWordsWithoutHUD(name)
 		if len(nameWords) == 0 {
 			continue
 		}
@@ -235,24 +257,157 @@ func targetTextMatchesExcludedName(text, names string) bool {
 			continue
 		}
 
-		// Multi-word exclusions must match a multi-word target name. The old
-		// fuzzy word comparison let "Vasabhum" match "Vasabhum Caura" merely
-		// because the first word was similar. Compare only spans with the same
-		// word count and reject candidates that are materially shorter.
+		// Multi-word exclusions must match a complete multi-word target name,
+		// never a prefix or suffix of a longer Kathana name.
 		for start := 0; start+len(nameWords) <= len(ocrWords); start++ {
-			candidate := strings.Join(ocrWords[start:start+len(nameWords)], "")
-			if candidate == compactName {
-				return true
-			}
-			if len(candidate)*100 < len(compactName)*80 {
+			if !targetNameSpanStandsAlone(ocrWords, start, len(nameWords)) {
 				continue
 			}
-			if float64(longestCommonSubsequence(compactName, candidate))/float64(len(compactName)) >= 0.72 {
+			candidateWords := ocrWords[start : start+len(nameWords)]
+			if targetMultiWordExcludedNameMatches(nameWords, candidateWords, compactName) {
 				return true
 			}
 		}
 	}
 	return false
+}
+
+func targetMultiWordExcludedNameMatches(expectedWords, candidateWords []string, compactExpected string) bool {
+	allWordsMatch := true
+	hasExactWord := false
+	for index, expected := range expectedWords {
+		candidate := candidateWords[index]
+		if expected == candidate {
+			hasExactWord = true
+		}
+		if !targetWhitelistWordMatches(expected, candidate) {
+			allWordsMatch = false
+		}
+	}
+	if allWordsMatch {
+		return true
+	}
+
+	// Retain the known severe camera-noise fallback ("Kembo Tonyo" can become
+	// "kembs tsyns"), but never use it when any word was an exact match. That
+	// rule prevents a shared first word such as "Ulkhamuka" from making
+	// "Ulkhamuka Caura" match "Ulkhamuka Satvan".
+	if hasExactWord {
+		return false
+	}
+	candidate := strings.Join(candidateWords, "")
+	if len(candidate)*100 < len(compactExpected)*80 {
+		return false
+	}
+	commonRatio := float64(longestCommonSubsequence(compactExpected, candidate)) / float64(len(compactExpected))
+	firstRatio := float64(longestCommonSubsequence(expectedWords[0], candidateWords[0])) / float64(len(expectedWords[0]))
+	return commonRatio >= 0.60 && firstRatio >= 0.80 &&
+		len(candidateWords[0])*100 >= len(expectedWords[0])*75
+}
+
+// targetTextMatchesWhitelistedName is intentionally stricter than skip-name
+// matching. A whitelist authorizes attacks, so sharing a suffix must never be
+// enough: "Mob Tonyo" must not authorize "Kembo Tonyo" merely because both
+// contain "Tonyo". Each word needs to be exact or a very small OCR typo.
+func targetTextMatchesWhitelistedName(text, names string) bool {
+	ocrWords := targetNameWordsWithoutHUD(text)
+	for _, name := range strings.Split(names, ";") {
+		nameWords := targetNameWordsWithoutHUD(name)
+		if len(nameWords) == 0 {
+			continue
+		}
+		for start := 0; start < len(ocrWords); start++ {
+			end, matched := targetWhitelistedWordsMatch(nameWords, ocrWords, start)
+			if matched && targetNameSpanStandsAlone(ocrWords, start, end-start) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// targetWhitelistedWordsMatch keeps whitelist checks strict while accepting a
+// common OCR artefact where one expected word is split in two ("Tonyo" ->
+// "to nyo"). Only two short adjacent fragments may be joined, and only when
+// their joined value matches the expected word. This deliberately does not
+// join ordinary name words, so similar targets keep their word boundaries.
+func targetWhitelistedWordsMatch(expectedWords, ocrWords []string, start int) (int, bool) {
+	var match func(expectedIndex, ocrIndex int) (int, bool)
+	match = func(expectedIndex, ocrIndex int) (int, bool) {
+		if expectedIndex == len(expectedWords) {
+			return ocrIndex, true
+		}
+		if ocrIndex >= len(ocrWords) {
+			return 0, false
+		}
+
+		expected := expectedWords[expectedIndex]
+		if targetWhitelistWordMatches(expected, ocrWords[ocrIndex]) {
+			if end, ok := match(expectedIndex+1, ocrIndex+1); ok {
+				return end, true
+			}
+		}
+
+		// Do not turn two normal target-name words into one. OCR fragments are
+		// characteristically short, as in "to nyo" for "tonyo".
+		if ocrIndex+1 < len(ocrWords) && len(ocrWords[ocrIndex]) <= 3 && len(ocrWords[ocrIndex+1]) <= 3 {
+			joined := ocrWords[ocrIndex] + ocrWords[ocrIndex+1]
+			if targetWhitelistWordMatches(expected, joined) {
+				if end, ok := match(expectedIndex+1, ocrIndex+2); ok {
+					return end, true
+				}
+			}
+		}
+		return 0, false
+	}
+
+	return match(0, start)
+}
+
+func targetWhitelistWordMatches(expected, candidate string) bool {
+	if expected == candidate {
+		return true
+	}
+	if expected == "" || candidate == "" {
+		return false
+	}
+
+	maxDistance := 1
+	if len(expected) >= 8 {
+		maxDistance = 2
+	}
+	lengthDifference := len(expected) - len(candidate)
+	if lengthDifference < 0 {
+		lengthDifference = -lengthDifference
+	}
+	if lengthDifference > maxDistance {
+		return false
+	}
+	return levenshteinDistance(expected, candidate) <= maxDistance
+}
+
+func levenshteinDistance(a, b string) int {
+	previous := make([]int, len(b)+1)
+	current := make([]int, len(b)+1)
+	for index := range previous {
+		previous[index] = index
+	}
+	for index := 1; index <= len(a); index++ {
+		current[0] = index
+		for other := 1; other <= len(b); other++ {
+			cost := 0
+			if a[index-1] != b[other-1] {
+				cost = 1
+			}
+			current[other] = minInt(
+				previous[other]+1,
+				current[other-1]+1,
+				previous[other-1]+cost,
+			)
+		}
+		previous, current = current, previous
+	}
+	return previous[len(b)]
 }
 
 // oneWordExcludedNameFuzzyMatch retains the OCR tolerance needed by longer
@@ -287,10 +442,16 @@ func oneWordExcludedNameFuzzyMatch(expected, candidate string) bool {
 // One-word exclusions are intentionally not included here. A user can exclude
 // "Vasabhum" while still wanting to attack a monster named "Vasabhum Caura".
 func targetTextPotentiallyMatchesExcludedName(text, names string) bool {
-	ocrWords := targetNameWords(text)
+	ocrWords := targetNameWordsWithoutHUD(text)
 	for _, name := range strings.Split(names, ";") {
-		nameWords := targetNameWords(name)
+		nameWords := targetNameWordsWithoutHUD(name)
 		if len(nameWords) < 2 {
+			continue
+		}
+		// A reading with as many words as the configured name is no longer
+		// clipped. Treat it as its own complete target rather than blocking a
+		// longer/shorter Kathana name that shares the first word.
+		if len(ocrWords) >= len(nameWords) {
 			continue
 		}
 
@@ -314,6 +475,53 @@ func targetTextPotentiallyMatchesExcludedName(text, names string) bool {
 		}
 	}
 	return false
+}
+
+// targetSingleWordNameKey returns a stable, complete one-word reading from a
+// target header. "Lv" and the following level are HUD metadata, not part of a
+// name. It is used to resolve the unavoidable ambiguity between a real target
+// named "Vasabhum" and a clipped OCR read of "Vasabhum Caura".
+func targetSingleWordNameKey(text string) string {
+	var nameWords []string
+	for _, word := range targetNameWordsWithoutHUD(text) {
+		if len(word) >= 3 && word != "detected" && word != "diacritics" {
+			nameWords = append(nameWords, word)
+		}
+	}
+	if len(nameWords) != 1 {
+		return ""
+	}
+	return nameWords[0]
+}
+
+// targetNameWordsWithoutHUD removes the level marker and all following HUD
+// metadata before a name is compared. Without this, "Lv" can be mistaken for
+// a third name word and let a shorter target match a longer configured name.
+func targetNameWordsWithoutHUD(text string) []string {
+	var words []string
+	for _, word := range targetNameWords(text) {
+		if word == "lv" || word == "level" {
+			break
+		}
+		words = append(words, word)
+	}
+	return words
+}
+
+// targetNameSpanStandsAlone rejects a configured name when it is only the
+// prefix or suffix of a longer visible target name. Short OCR debris such as
+// "at" or "aes" is allowed around the name, while normal Kathana name words
+// (four letters or more) make the candidate a different target.
+func targetNameSpanStandsAlone(ocrWords []string, start, length int) bool {
+	for index, word := range ocrWords {
+		if index >= start && index < start+length {
+			continue
+		}
+		if len(word) >= 4 {
+			return false
+		}
+	}
+	return true
 }
 
 func targetNameLettersOnly(text string) string {

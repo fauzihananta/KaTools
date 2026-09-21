@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -211,6 +212,33 @@ func NewRuntimeManager() *RuntimeManager {
 	return &RuntimeManager{}
 }
 
+// captureFPSForConfig keeps the always-on disconnect safeguard inexpensive
+// when the player uses only key scheduling. Screen-driven features still get
+// ten frames per second, which matches their 100-120 ms scan intervals.
+func captureFPSForConfig(cfg WebBotConfig) int {
+	targetFilterEnabled := cfg.TargetUntilDeadEnabled ||
+		(cfg.TargetEnabled && strings.TrimSpace(cfg.TargetUntilDeadCharacterName) != "")
+
+	if cfg.AutoAcceptEnabled ||
+		cfg.AutoPotHPEnabled ||
+		cfg.AutoPotTPEnabled ||
+		cfg.AutoPauseDeathEnabled ||
+		targetFilterEnabled {
+		return 10
+	}
+
+	// The disconnect scanner remains enabled, but its confirmation is allowed
+	// to take a little longer in a key-only profile.
+	return 1
+}
+
+func capturePollingInterval(captureFPS int) time.Duration {
+	if captureFPS <= 1 {
+		return 50 * time.Millisecond
+	}
+	return 10 * time.Millisecond
+}
+
 // ============================================================
 // START
 // ============================================================
@@ -255,8 +283,8 @@ func (m *RuntimeManager) Start(
 	fmt.Println("Starting KaTools Runtime")
 	fmt.Println("========================================")
 
-	// The normal bot does not need screen capture. WGC, frame mapping, and OCR
-	// are required only by Auto Accept Party or Auto Potion.
+	// WGC stays active for the built-in DC notification scanner, even when the
+	// optional OCR-driven features are disabled.
 	bot := NewBotController(hwnd, newDefaultBotConfig())
 	autoAccept := NewAutoAcceptController(cfg.AutoAcceptEnabled)
 	autoPot := NewAutoPotController(hwnd, cfg)
@@ -269,31 +297,16 @@ func (m *RuntimeManager) Start(
 		targetFilterEnabled,
 		cfg.TargetUntilDeadEnabled && cfg.TargetUntilDeadSupport,
 		cfg.TargetUntilDeadCharacterName,
+		cfg.TargetNameFilterMode,
 	)
 	applyWebBotConfig(bot, autoAccept, autoPot, emergency, deathPause, targetUntil, cfg)
 
-	if !cfg.AutoAcceptEnabled && !autoPot.IsAnyEnabled() && !emergency.IsAnyEnabled() && !deathPause.IsEnabled() && !targetUntil.IsFilterEnabled() {
-		m.mu.Lock()
-		m.hwnd = hwnd
-		m.bot = bot
-		m.autoAccept = autoAccept
-		m.autoPot = autoPot
-		m.emergency = emergency
-		m.deathPause = deathPause
-		m.targetUntil = targetUntil
-		m.running = true
-		m.mu.Unlock()
-
-		fmt.Println("[WGC] Disabled: Auto Accept Party is unchecked.")
-		bot.Start()
-		return nil
-	}
-
 	// ========================================================
-	// Start WGC (Auto Accept Party only)
+	// Start WGC
 	// ========================================================
 
-	wgcCmd, err := startWGCCapture(hwnd)
+	captureFPS := captureFPSForConfig(cfg)
+	wgcCmd, err := startWGCCapture(hwnd, captureFPS)
 
 	if err != nil {
 		return err
@@ -596,7 +609,8 @@ func (m *RuntimeManager) Start(
 			deathPause,
 			targetUntil,
 			func(x, y int) { m.setCaptureOffset(x, y) },
-			func() { go m.Stop() },
+			func() { m.Stop() },
+			capturePollingInterval(captureFPS),
 			stopCh,
 		)
 
@@ -833,19 +847,7 @@ func (m *RuntimeManager) UpdateConfig(cfg WebBotConfig) error {
 	emergency := m.emergency
 	deathPause := m.deathPause
 	targetUntil := m.targetUntil
-	hwnd := m.hwnd
-	targetFilterEnabled := cfg.TargetUntilDeadEnabled ||
-		(cfg.TargetEnabled && strings.TrimSpace(cfg.TargetUntilDeadCharacterName) != "")
-	captureModeChanged := (cfg.AutoAcceptEnabled || cfg.AutoPotHPEnabled || cfg.AutoPotTPEnabled || cfg.AutoPauseDeathEnabled || targetFilterEnabled) !=
-		(autoAccept.IsEnabled() || autoPot.IsAnyEnabled() || deathPause.IsEnabled() || targetUntil.IsFilterEnabled())
 	m.mu.RUnlock()
-
-	// Toggling Auto Accept changes whether WGC is required at all. Recreate the
-	// runtime so checking it starts capture and unchecking it releases capture.
-	if captureModeChanged {
-		m.Stop()
-		return m.Start(hwnd, cfg)
-	}
 
 	bot.Stop()
 	applyWebBotConfig(bot, autoAccept, autoPot, emergency, deathPause, targetUntil, cfg)
@@ -1203,7 +1205,8 @@ func runPicker(
 	deathPause *DeathPauseController,
 	targetUntil *TargetUntilDeadController,
 	onCaptureOffset func(x, y int),
-	onDeath func(),
+	onRuntimeStop func(),
+	pollInterval time.Duration,
 	stopCh <-chan struct{},
 ) {
 
@@ -1249,6 +1252,7 @@ func runPicker(
 	deathOCR := ocrworker.New(tesseractPath)
 	resurrectionOCR := ocrworker.New(tesseractPath)
 	targetNameOCR := ocrworker.New(tesseractPath)
+	dcOCR := ocrworker.New(tesseractPath)
 	_ = hideROIConfigFiles()
 
 	ocrROI := partyROIToFrame(
@@ -1300,8 +1304,12 @@ func runPicker(
 	// second while the screen is normal. The occasional full fallback keeps
 	// detection working if a non-standard dialog escapes the visual detector.
 	const partyOCRActiveInterval = 500 * time.Millisecond
-	const partyOCRPassiveInterval = 3 * time.Second
-	const partyOCRFullFallbackInterval = 12 * time.Second
+	// The visual popup detector is the normal, immediate trigger. These are
+	// deliberately slow safety-net probes for unusual dialogs; invoking an
+	// external Tesseract process continuously while the game is normal is an
+	// unnecessary battery and CPU cost.
+	const partyOCRPassiveInterval = 10 * time.Second
+	const partyOCRFullFallbackInterval = 60 * time.Second
 	partyOCRVariantPhase := 0
 	lastPartyFullOCRAt := time.Now()
 
@@ -1323,10 +1331,19 @@ func runPicker(
 		generation uint64
 		revision   uint64
 		text       string
+		candidates []string
 		err        error
 	}
 	targetNameOCRResultCh := make(chan targetNameOCREvent, 1)
 	targetNameOCRBusy := false
+	type dcOCREvent struct {
+		text       string
+		candidates []string
+		err        error
+	}
+	dcOCRResultCh := make(chan dcOCREvent, 1)
+	dcOCRBusy := false
+	dcNotification := &DCNotificationController{}
 	type deathOCREvent struct {
 		text       string
 		err        error
@@ -1357,7 +1374,10 @@ func runPicker(
 	var lastPartyPanelCheck time.Time
 	var lastTargetBarAt time.Time
 	var lastDeathOCRAt time.Time
+	var lastDeathDialogCheckAt time.Time
 	var lastResurrectionOCRAt time.Time
+	var lastDCDialogCheckAt time.Time
+	var lastDCOCRAt time.Time
 	var lastTargetNameSignature uint64
 	var targetNameSignatureSet bool
 	var pendingTargetNameSignature uint64
@@ -1366,6 +1386,8 @@ func runPicker(
 	var targetNameVerified bool
 	var targetIsOwnCharacter bool
 	var targetNameValidationLogged bool
+	var targetAmbiguousName string
+	var targetAmbiguousNameReads int
 	lastTargetGeneration := bot.TargetGeneration()
 	var targetValidationRevision uint64
 	var targetValidationReadyAt time.Time
@@ -1398,11 +1420,15 @@ func runPicker(
 	// and never retarget while that OCR request is still in flight.
 	const targetValidationTimeout = 3 * time.Second
 	// Death dialogs are much smaller than party popups, so their visual shape
-	// does not reliably satisfy PartyDetector's popup thresholds. Probe only the
-	// chosen Death ROI directly instead; the strict respawn-text check below is
-	// what authorizes a pause.
+	// does not reliably satisfy PartyDetector's popup thresholds. A small
+	// Message-dialog pixel gate avoids waking Tesseract while the player is
+	// alive; the strict respawn-text check below is still what authorizes pause.
 	const deathOCRMinInterval = 1500 * time.Millisecond
+	const deathDialogCheckInterval = 250 * time.Millisecond
+	const deathOCRIdleFallbackInterval = 10 * time.Second
 	const resurrectionOCRMinInterval = 600 * time.Millisecond
+	const dcDialogCheckInterval = 200 * time.Millisecond
+	const dcOCRMinInterval = 700 * time.Millisecond
 
 	logAutoPotEvents := func(events []AutoPotEvent) {
 		for _, potEvent := range events {
@@ -1875,7 +1901,15 @@ func runPicker(
 				}
 				break
 			}
-			if !targetTextHasReadableName(event.text) {
+			ocrTexts := append([]string{event.text}, event.candidates...)
+			readableText := ""
+			for _, text := range ocrTexts {
+				if targetTextHasReadableName(text) {
+					readableText = text
+					break
+				}
+			}
+			if readableText == "" {
 				if !targetNameValidationLogged {
 					targetNameValidationLogged = true
 					appendOCRLog("TARGET VALIDATION | Name OCR unreadable | Text=%q", oCRTextForLog(event.text))
@@ -1884,28 +1918,108 @@ func runPicker(
 			}
 
 			targetNameVerified = true
-			if targetTextMatchesExcludedName(event.text, targetUntil.ExcludedNames()) {
+			matchedText := ""
+			nameMatches := targetTextMatchesExcludedName
+			if targetUntil.IsWhitelistMode() {
+				nameMatches = targetTextMatchesWhitelistedName
+			}
+			for _, text := range ocrTexts {
+				if nameMatches(text, targetUntil.ExcludedNames()) {
+					matchedText = text
+					break
+				}
+			}
+			if targetUntil.IsWhitelistMode() {
+				if matchedText != "" {
+					targetAmbiguousName = ""
+					targetAmbiguousNameReads = 0
+					targetIsOwnCharacter = false
+					bot.SetTargetActionReady(true)
+					appendOCRLog("TARGET VALIDATION | Whitelisted target | Text=%q", oCRTextForLog(matchedText))
+				} else {
+					targetIsOwnCharacter = true
+					bot.SetTargetActionReady(false)
+					if targetUntil.ForceRetarget() && bot.CastTarget() {
+						appendOCRLog("TARGET VALIDATION | Not whitelisted | Text=%q | Target sent", oCRTextForLog(readableText))
+					}
+				}
+			} else if matchedText != "" {
+				targetAmbiguousName = ""
+				targetAmbiguousNameReads = 0
 				targetIsOwnCharacter = true
 				bot.SetTargetActionReady(false)
 				if targetUntil.ForceRetarget() && bot.CastTarget() {
-					appendOCRLog("TARGET UNTIL DEAD | Excluded target skipped | Text=%q | Target sent", oCRTextForLog(event.text))
-				}
-			} else if targetTextPotentiallyMatchesExcludedName(event.text, targetUntil.ExcludedNames()) {
-				// Do not turn a clipped reading of a skipped multi-word target
-				// into an allowed target. Wait for another OCR result; the regular
-				// validation timeout will safely move to the next target if the
-				// full name never becomes readable.
-				targetNameVerified = false
-				targetIsOwnCharacter = true
-				bot.SetTargetActionReady(false)
-				if !targetNameValidationLogged {
-					targetNameValidationLogged = true
-					appendOCRLog("TARGET VALIDATION | Possible excluded target; waiting for complete OCR | Text=%q", oCRTextForLog(event.text))
+					appendOCRLog("TARGET UNTIL DEAD | Excluded target skipped | Text=%q | Target sent", oCRTextForLog(matchedText))
 				}
 			} else {
-				targetIsOwnCharacter = false
-				bot.SetTargetActionReady(true)
-				appendOCRLog("TARGET VALIDATION | Allowed target | Text=%q", oCRTextForLog(event.text))
+				possibleText := ""
+				for _, text := range ocrTexts {
+					if targetTextPotentiallyMatchesExcludedName(text, targetUntil.ExcludedNames()) {
+						possibleText = text
+						break
+					}
+				}
+				if possibleText != "" {
+					// A genuine one-word target can have the same first word as a
+					// configured two-word skip name (for example "Vasabhum" versus
+					// "Vasabhum Caura"). One OCR frame cannot distinguish that from a
+					// clipped two-word name, so require the one-word reading twice before
+					// allowing it. A complete two-word skip remains rejected immediately.
+					key := targetSingleWordNameKey(possibleText)
+					if key != "" && key == targetAmbiguousName {
+						targetAmbiguousNameReads++
+					} else {
+						targetAmbiguousName = key
+						targetAmbiguousNameReads = 1
+					}
+					if key != "" && targetAmbiguousNameReads >= 2 {
+						targetNameVerified = true
+						targetIsOwnCharacter = false
+						bot.SetTargetActionReady(true)
+						appendOCRLog("TARGET VALIDATION | Allowed stable one-word target | Text=%q", oCRTextForLog(possibleText))
+					} else {
+						targetNameVerified = false
+						targetIsOwnCharacter = true
+						bot.SetTargetActionReady(false)
+						if !targetNameValidationLogged {
+							targetNameValidationLogged = true
+							appendOCRLog("TARGET VALIDATION | Possible excluded target; waiting for complete OCR | Text=%q", oCRTextForLog(possibleText))
+						}
+					}
+				} else {
+					targetAmbiguousName = ""
+					targetAmbiguousNameReads = 0
+					targetIsOwnCharacter = false
+					bot.SetTargetActionReady(true)
+					appendOCRLog("TARGET VALIDATION | Allowed target | Text=%q", oCRTextForLog(readableText))
+				}
+			}
+		default:
+		}
+
+		// DC detection has no checkbox and no user-selected ROI. It is separate
+		// from Death Area handling: only a centered Message dialog with the full
+		// connection-failed phrase can acknowledge itself and end the runtime.
+		select {
+		case event := <-dcOCRResultCh:
+			dcOCRBusy = false
+			if event.err != nil {
+				break
+			}
+			texts := append([]string{event.text}, event.candidates...)
+			if dcNotification.Observe(texts) {
+				// Stop the scheduler before sending ENTER: after this point no skill,
+				// target, potion, or other bot input can race the closing game window.
+				bot.Stop()
+				sent := pressEnterToWindow(uintptr(hwnd))
+				appendOCRLog(
+					"DC DETECTED | Connection failed confirmed | Enter sent=%t | Stopping KaTools runtime | Text=%q",
+					sent,
+					oCRTextForLog(event.text),
+				)
+				if onRuntimeStop != nil {
+					go onRuntimeStop()
+				}
 			}
 		default:
 		}
@@ -2304,7 +2418,7 @@ func runPicker(
 			lastFrameNumber {
 
 			time.Sleep(
-				5 * time.Millisecond,
+				pollInterval,
 			)
 
 			continue
@@ -2319,7 +2433,7 @@ func runPicker(
 			partyDetectorInterval {
 
 			time.Sleep(
-				5 * time.Millisecond,
+				pollInterval,
 			)
 
 			continue
@@ -2394,12 +2508,38 @@ func runPicker(
 			}
 		}
 
-		// Death detection deliberately uses periodic OCR rather than the party
-		// popup visual detector. A valid respawn phrase is required before any
-		// pause occurs, so this remains safe even when the selected ROI changes
-		// for unrelated game effects.
-		if deathPause != nil && deathPause.IsEnabled() && !deathOCRBusy &&
-			time.Since(lastDeathOCRAt) >= deathOCRMinInterval {
+		// The built-in DC scanner checks only a small, fixed center crop while the
+		// bot is running. Tesseract is started only after that crop looks like an
+		// opaque Message dialog; it never uses the Death Area or its state.
+		if !dcOCRBusy && time.Since(lastDCDialogCheckAt) >= dcDialogCheckInterval {
+			lastDCDialogCheckAt = time.Now()
+			dcROI := dcNotificationROI(reader.width, reader.height)
+			img, ok := reader.ToImageRect(dcROI.Min.X, dcROI.Min.Y, dcROI.Dx(), dcROI.Dy())
+			if ok && dcDialogLooksPresent(img) && time.Since(lastDCOCRAt) >= dcOCRMinInterval {
+				dcOCRBusy = true
+				lastDCOCRAt = time.Now()
+				go func(img image.Image) {
+					result, err := dcOCR.RunDisconnectImage(img)
+					event := dcOCREvent{err: err}
+					if result != nil {
+						event.text = result.Text
+						event.candidates = result.Candidates
+					}
+					select {
+					case dcOCRResultCh <- event:
+					case <-stopCh:
+					}
+				}(img)
+			}
+		}
+
+		// Once death was confirmed, dialog disappearance is enough to decide
+		// when the existing HP-based resume path may run. Its saved dark-pixel
+		// fingerprint is much cheaper than launching Tesseract every 1.5 seconds
+		// while the player waits at a death dialog or clicks OK manually.
+		if deathPause != nil && deathPause.IsTriggered() &&
+			time.Since(lastDeathDialogCheckAt) >= deathDialogCheckInterval {
+			lastDeathDialogCheckAt = time.Now()
 			deathROI := partyROIToFrame(LoadDeathROI(), scaleX, scaleY, frameOriginX, frameOriginY)
 			deathROI = applyCaptureOffset(deathROI)
 			if deathROI.Selected {
@@ -2410,20 +2550,48 @@ func runPicker(
 					deathROI.Height,
 				)
 				if ok {
-					deathOCRBusy = true
-					lastDeathOCRAt = time.Now()
-					dialogMask := deathDialogMaskFromImage(img)
-					go func(img image.Image, dialogMask deathDialogMask) {
-						result, err := deathOCR.RunImage(img)
-						event := deathOCREvent{err: err, dialogMask: dialogMask}
-						if result != nil {
-							event.text = result.Text
-						}
-						select {
-						case deathOCRResultCh <- event:
-						case <-stopCh:
-						}
-					}(img, dialogMask)
+					deathPause.ObserveDeathDialog(
+						deathPause.DeathDialogMatches(deathDialogMaskFromImage(img)),
+					)
+				}
+			}
+		}
+
+		// Death detection uses a cheap dialog-shape check before OCR. A periodic
+		// fallback retains detection for unusual UI themes where the visual gate
+		// is too conservative, without paying for Tesseract on every idle scan.
+		if deathPause != nil && deathPause.IsEnabled() && !deathPause.IsTriggered() &&
+			!deathOCRBusy && time.Since(lastDeathDialogCheckAt) >= deathDialogCheckInterval {
+			lastDeathDialogCheckAt = time.Now()
+			deathROI := partyROIToFrame(LoadDeathROI(), scaleX, scaleY, frameOriginX, frameOriginY)
+			deathROI = applyCaptureOffset(deathROI)
+			if deathROI.Selected {
+				img, ok := reader.ToImageRect(
+					deathROI.X,
+					deathROI.Y,
+					deathROI.Width,
+					deathROI.Height,
+				)
+				if ok {
+					dialogCandidate := dcDialogLooksPresent(img)
+					fallbackDue := time.Since(lastDeathOCRAt) >= deathOCRIdleFallbackInterval
+					candidateDue := dialogCandidate && time.Since(lastDeathOCRAt) >= deathOCRMinInterval
+					if fallbackDue || candidateDue {
+						deathOCRBusy = true
+						lastDeathOCRAt = time.Now()
+						dialogMask := deathDialogMaskFromImage(img)
+						go func(img image.Image, dialogMask deathDialogMask) {
+							result, err := deathOCR.RunImage(img)
+							event := deathOCREvent{err: err, dialogMask: dialogMask}
+							if result != nil {
+								event.text = result.Text
+							}
+							select {
+							case deathOCRResultCh <- event:
+							case <-stopCh:
+							}
+						}(img, dialogMask)
+					}
 				}
 			}
 		}
@@ -2491,6 +2659,8 @@ func runPicker(
 						targetIsOwnCharacter = false
 						targetNameVerified = false
 						targetNameValidationLogged = false
+						targetAmbiguousName = ""
+						targetAmbiguousNameReads = 0
 						targetValidationReadyAt = time.Now().Add(targetValidationSettleDelay)
 						targetValidationStartedAt = time.Now()
 					}
@@ -2527,6 +2697,8 @@ func runPicker(
 								targetIsOwnCharacter = false
 								targetNameVerified = false
 								targetNameValidationLogged = false
+								targetAmbiguousName = ""
+								targetAmbiguousNameReads = 0
 								targetValidationStartedAt = time.Now()
 								bot.SetTargetActionReady(false)
 							}
@@ -2548,6 +2720,7 @@ func runPicker(
 								event := targetNameOCREvent{generation: generation, revision: revision, err: err}
 								if result != nil {
 									event.text = result.Text
+									event.candidates = result.Candidates
 								}
 								select {
 								case targetNameOCRResultCh <- event:
@@ -2564,6 +2737,8 @@ func runPicker(
 						if !barVisible {
 							targetIsOwnCharacter = false
 							targetNameVerified = false
+							targetAmbiguousName = ""
+							targetAmbiguousNameReads = 0
 							bot.SetTargetActionReady(false)
 						}
 						retarget := targetUntil.Observe(targetPresentForSupport)
@@ -2593,7 +2768,7 @@ func runPicker(
 		}
 
 		time.Sleep(
-			5 * time.Millisecond,
+			pollInterval,
 		)
 	}
 }
@@ -3046,6 +3221,7 @@ func readBytes(
 
 func startWGCCapture(
 	hwnd uintptr,
+	captureFPS int,
 ) (*exec.Cmd, error) {
 
 	exePath, err :=
@@ -3110,11 +3286,20 @@ func startWGCCapture(
 			hwnd,
 		)
 
+	if captureFPS < 1 {
+		captureFPS = 1
+	}
+	if captureFPS > 10 {
+		captureFPS = 10
+	}
+
 	cmd :=
 		exec.Command(
 			capturePath,
 			"--hwnd",
 			hwndArg,
+			"--fps",
+			strconv.Itoa(captureFPS),
 		)
 
 	cmd.SysProcAttr =
