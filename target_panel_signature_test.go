@@ -44,6 +44,46 @@ func TestTargetPanelNameImageKeepsFullHeader(t *testing.T) {
 	}
 }
 
+func TestTargetPanelNameImageStopsBeforeDetectedHPBar(t *testing.T) {
+	img := image.NewRGBA(image.Rect(0, 0, 100, 60))
+	for y := 24; y < 30; y++ {
+		for x := 5; x < 95; x++ {
+			img.Set(x, y, color.RGBA{R: 210, A: 255})
+		}
+	}
+
+	name := targetPanelNameImage(img)
+	if name == nil {
+		t.Fatal("name crop is nil")
+	}
+	if got, want := name.Bounds().Dy(), 24; got != want {
+		t.Fatalf("name crop height = %d, want %d before HP bar", got, want)
+	}
+}
+
+func TestTargetPanelNameImageExcludesHUDAboveNameLine(t *testing.T) {
+	img := image.NewRGBA(image.Rect(0, 0, 100, 65))
+	// This models a TP bar from an adjacent player HUD above the actual target
+	// name.  The name crop must start below this line.
+	img.Set(2, 2, color.RGBA{R: 255, G: 255, B: 255, A: 255})
+	for y := 41; y < 47; y++ {
+		for x := 5; x < 95; x++ {
+			img.Set(x, y, color.RGBA{R: 210, A: 255})
+		}
+	}
+
+	name := targetPanelNameImage(img)
+	if name == nil {
+		t.Fatal("name crop is nil")
+	}
+	if got, want := name.Bounds().Dy(), targetPanelNameMaxHeight; got != want {
+		t.Fatalf("name crop height = %d, want %d", got, want)
+	}
+	if got := color.RGBAModel.Convert(name.At(2, 2)).(color.RGBA); got.R != 0 || got.G != 0 || got.B != 0 {
+		t.Fatalf("upper HUD pixel leaked into name crop: %#v", got)
+	}
+}
+
 func TestTargetPanelNameLooksPresentRequiresHeaderGlyphs(t *testing.T) {
 	img := image.NewRGBA(image.Rect(0, 0, 100, 40))
 	if targetPanelNameLooksPresent(img) {

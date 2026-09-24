@@ -420,12 +420,57 @@ func statusRowPairText(text string) string {
 
 // statusNumbersImage removes the character-name/level header from a selected
 // HP/TP panel. The picker asks for the full panel for a stable bar detector,
-// while OCR only needs the lower bar rows.
+// while OCR only needs the bar rows.  A static one-third trim fails when the
+// game HUD is docked against an edge: the selection can include more empty
+// space above the name, so its level digits remain in the OCR crop.  Locate
+// the red and blue bars first and crop tightly around them instead.
 func statusNumbersImage(src image.Image) image.Image {
 	bounds := src.Bounds()
 	width, height := bounds.Dx(), bounds.Dy()
 	if width <= 0 || height <= 4 {
 		return src
+	}
+
+	redTop, redBottom, blueTop, blueBottom := -1, -1, -1, -1
+	minimumBarPixels := max(6, width/30)
+	for y := 0; y < height; y++ {
+		redPixels, bluePixels := 0, 0
+		for x := 0; x < width; x++ {
+			r, g, b, _ := src.At(bounds.Min.X+x, bounds.Min.Y+y).RGBA()
+			r8, g8, b8 := uint8(r>>8), uint8(g>>8), uint8(b>>8)
+			if statusHPBarPixel(r8, g8, b8) {
+				redPixels++
+			}
+			if statusTPBarPixel(r8, g8, b8) {
+				bluePixels++
+			}
+		}
+		if redPixels >= minimumBarPixels {
+			if redTop < 0 {
+				redTop = y
+			}
+			redBottom = y
+		}
+		if bluePixels >= minimumBarPixels {
+			if blueTop < 0 {
+				blueTop = y
+			}
+			blueBottom = y
+		}
+	}
+
+	if redTop >= 0 && blueTop >= 0 {
+		top := min(redTop, blueTop) - 5
+		bottom := max(redBottom, blueBottom) + 6
+		if top < 0 {
+			top = 0
+		}
+		if bottom > height {
+			bottom = height
+		}
+		if bottom-top >= 8 {
+			return cropImageRows(src, top, bottom)
+		}
 	}
 
 	top := height / 3
@@ -442,6 +487,14 @@ func statusNumbersImage(src image.Image) image.Image {
 	return dst
 }
 
+func statusHPBarPixel(r, g, b uint8) bool {
+	return int(r) >= 100 && int(r) >= int(g)+45 && int(r) >= int(b)+45
+}
+
+func statusTPBarPixel(r, g, b uint8) bool {
+	return int(b) >= 100 && int(b) >= int(r)+35 && int(b) >= int(g)+20
+}
+
 // statusRowImages separates the HP and TP rows after the panel header has
 // been removed. A small overlap keeps the baseline intact when a selection is
 // one or two pixels taller or shorter on another display.
@@ -450,6 +503,43 @@ func statusRowImages(src image.Image) []image.Image {
 	width, height := bounds.Dx(), bounds.Dy()
 	if width <= 0 || height < 8 {
 		return nil
+	}
+
+	// The digits are drawn directly on top of their coloured bars. When both
+	// rows are present, crop each one from its actual colour bounds instead of
+	// merely splitting the selected rectangle in half. This keeps a title-bar
+	// or extra blank space from moving the split through the HP or TP digits.
+	minimumBarPixels := max(6, width/30)
+	redTop, redBottom, blueTop, blueBottom := -1, -1, -1, -1
+	for y := 0; y < height; y++ {
+		redPixels, bluePixels := 0, 0
+		for x := 0; x < width; x++ {
+			r, g, b, _ := src.At(bounds.Min.X+x, bounds.Min.Y+y).RGBA()
+			if statusHPBarPixel(uint8(r>>8), uint8(g>>8), uint8(b>>8)) {
+				redPixels++
+			}
+			if statusTPBarPixel(uint8(r>>8), uint8(g>>8), uint8(b>>8)) {
+				bluePixels++
+			}
+		}
+		if redPixels >= minimumBarPixels {
+			if redTop < 0 {
+				redTop = y
+			}
+			redBottom = y
+		}
+		if bluePixels >= minimumBarPixels {
+			if blueTop < 0 {
+				blueTop = y
+			}
+			blueBottom = y
+		}
+	}
+	if redTop >= 0 && blueTop >= 0 {
+		return []image.Image{
+			cropImageRows(src, redTop-6, redBottom+7),
+			cropImageRows(src, blueTop-6, blueBottom+7),
+		}
 	}
 
 	middle := height / 2
@@ -498,6 +588,16 @@ func cropImageRows(src image.Image, top, bottom int) image.Image {
 // a grayscale threshold, it retains only near-white UI text and therefore
 // remains stable when the camera moves behind the panel.
 func (o *OCR) RunTargetNameImage(img image.Image) (*Result, error) {
+	return o.RunTargetNameImageUntil(img, nil)
+}
+
+// RunTargetNameImageUntil reads a target HUD and lets a caller end the
+// fallback chain once it has a conclusive result. Target-name filters already
+// know the small list of names that matters to them, so there is no reason to
+// make a low-spec PC start another Tesseract process after the cleanest crop
+// has matched that list. A nil accept function preserves the complete
+// accuracy-oriented fallback chain used by the historical API.
+func (o *OCR) RunTargetNameImageUntil(img image.Image, accept func(string) bool) (*Result, error) {
 	if img == nil {
 		return nil, fmt.Errorf("image is nil")
 	}
@@ -507,31 +607,49 @@ func (o *OCR) RunTargetNameImage(img image.Image) (*Result, error) {
 	var fallback string
 	var candidates []string
 	for i, variant := range variants {
-		text, err := o.runTesseractImageWithOptions(
-			variant,
-			i,
-			"7",
-			"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 ",
-		)
-		if err != nil {
-			continue
+		// The colour-aware mask has already removed the transparent panel and
+		// terrain.  Besides a single-line read, let Tesseract try sparse text
+		// on that one clean image: at small window sizes Kathana leaves a large
+		// gap between a short name (for example "Boa") and "Lv.15". PSM 7 can
+		// occasionally turn that gap or the panel border into extra letters,
+		// whereas PSM 11 reads the two glyph clusters independently. Keep the
+		// grayscale fallback single-pass so target validation stays responsive.
+		psms := []string{"7"}
+		if i == 0 {
+			psms = append(psms, "11")
 		}
-		text = normalize(text)
-		if text == "" {
-			continue
-		}
-		if fallback == "" {
-			fallback = text
-		}
-		alreadySeen := false
-		for _, candidate := range candidates {
-			if candidate == text {
-				alreadySeen = true
-				break
+		for _, psm := range psms {
+			text, err := o.runTesseractImageWithOptions(
+				variant,
+				i,
+				psm,
+				"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 ",
+			)
+			if err != nil {
+				continue
 			}
-		}
-		if !alreadySeen {
-			candidates = append(candidates, text)
+			text = normalize(text)
+			if text == "" {
+				continue
+			}
+			if fallback == "" {
+				fallback = text
+			}
+			alreadySeen := false
+			for _, candidate := range candidates {
+				if candidate == text {
+					alreadySeen = true
+					break
+				}
+			}
+			if !alreadySeen {
+				candidates = append(candidates, text)
+			}
+			// Do this after recording the candidate so callers always receive a
+			// normal Result, even when the first masked name crop is decisive.
+			if accept != nil && accept(text) {
+				return &Result{Text: fallback, Candidates: candidates, Duration: time.Since(startTotal)}, nil
+			}
 		}
 	}
 
@@ -587,16 +705,45 @@ func (o *OCR) RunDisconnectImage(img image.Image) (*Result, error) {
 // glyphs from a bright texture or effect shown behind the panel.
 func targetNameOCRVariants(img image.Image) []image.Image {
 	base := buildOCRVariants(img)
-	variants := []image.Image{
-		upscale3x(targetNameBrightGlyphImage(img)),
+	// The level is rendered at the far right of the compact HUD.  Keep a
+	// name-only read first: on small displays the gold panel texture between a
+	// short name and "Lv.15" can make Tesseract merge both clusters ("Boa"
+	// becoming "ena ly15"). It is both the least noisy and the fastest route
+	// to a conclusive whitelist/skip match. Three quarters still leaves room
+	// for normal multi-word Kathana monster names while excluding the level
+	// column.
+	variants := make([]image.Image, 0, 3)
+	if nameOnly := targetNameLeftImage(img); nameOnly != nil {
+		variants = append(variants, upscale3x(targetNameBrightGlyphImage(nameOnly)))
 	}
+	variants = append(variants, upscale3x(targetNameBrightGlyphImage(img)))
 	// Keep the historical grayscale image as a fallback for UI themes where the
-	// name glyphs are not pure white. Limiting this to two OCR passes keeps
-	// target validation responsive on slower PCs.
+	// name glyphs are not pure white. The two colour-aware reads plus this
+	// fallback remain deliberately bounded for slower PCs.
 	if len(base) > 0 {
 		variants = append(variants, base[0])
 	}
 	return variants
+}
+
+func targetNameLeftImage(src image.Image) image.Image {
+	bounds := src.Bounds()
+	width, height := bounds.Dx(), bounds.Dy()
+	if width < 12 || height <= 0 {
+		return nil
+	}
+
+	nameWidth := width * 3 / 4
+	if nameWidth <= 0 || nameWidth >= width {
+		return nil
+	}
+	dst := image.NewRGBA(image.Rect(0, 0, nameWidth, height))
+	for y := 0; y < height; y++ {
+		for x := 0; x < nameWidth; x++ {
+			dst.Set(x, y, src.At(bounds.Min.X+x, bounds.Min.Y+y))
+		}
+	}
+	return dst
 }
 
 // targetNameBrightGlyphImage makes near-white, low-saturation HUD glyphs black

@@ -14,7 +14,14 @@ import (
 
 const (
 	kaToolsInternalUIAddress = "127.0.0.1:8787"
-	kaToolsPanelWidth        = 660
+	// The web UI switches to its compact one-column layout below 750 px. Keep
+	// the default side panel narrow enough for smaller laptop displays and,
+	// crucially, do not set a larger Win32 minimum size than its initial width.
+	// The old 960 px HintMin made a zoomed-out panel look small while Windows
+	// still refused to resize the actual window any narrower.
+	kaToolsPanelWidth     = 540
+	kaToolsPanelMinWidth  = 420
+	kaToolsPanelMinHeight = 480
 
 	kaToolsSPIGetWorkArea = 0x0030
 	kaToolsSWPNoZOrder    = 0x0004
@@ -60,8 +67,10 @@ func startWebView2UI(runtimeManager *RuntimeManager) error {
 		return fmt.Errorf("create WebView2 window: Microsoft Edge WebView2 Runtime is required")
 	}
 	defer view.Destroy()
+	setKaToolsWindow(windows.Handle(uintptr(view.Window())))
+	defer setKaToolsWindow(0)
 
-	view.SetSize(960, 640, webview2.HintMin)
+	view.SetSize(kaToolsPanelMinWidth, kaToolsPanelMinHeight, webview2.HintMin)
 	positionKaToolsPanelAtRight(view.Window())
 	view.Navigate("http://" + kaToolsInternalUIAddress)
 	view.Run()

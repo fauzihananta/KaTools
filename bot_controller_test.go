@@ -26,6 +26,14 @@ func TestScheduledTargetWaitsForNameValidationButInitialTargetCanStartIt(t *test
 	}
 }
 
+func TestTargetDelayIsAvailableToValidationFallback(t *testing.T) {
+	want := 2 * time.Second
+	bot := NewBotController(0, BotConfig{TargetDelay: want})
+	if got := bot.TargetDelay(); got != want {
+		t.Fatalf("TargetDelay() = %s, want %s", got, want)
+	}
+}
+
 func TestSupportSkillRulesKeepWithTargetIndependentFromHeldSlots(t *testing.T) {
 	bot := NewBotController(0, BotConfig{})
 	bot.SetTargetActionFilterEnabled(true)

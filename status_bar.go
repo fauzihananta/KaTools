@@ -156,9 +156,12 @@ func statusBarPercent(filledWidth, fullWidth int) float64 {
 }
 
 func isHPBarPixel(r, g, b uint8) bool {
-	return r >= 100 && r >= g+45 && r >= b+45
+	// Convert before adding the colour margin.  uint8 arithmetic wraps at 255,
+	// which previously made a white HUD glyph (255,255,255) look like a red
+	// bar pixel because 255+45 became 44.
+	return int(r) >= 100 && int(r) >= int(g)+45 && int(r) >= int(b)+45
 }
 
 func isTPBarPixel(r, g, b uint8) bool {
-	return b >= 100 && b >= r+35 && b >= g+20
+	return int(b) >= 100 && int(b) >= int(r)+35 && int(b) >= int(g)+20
 }

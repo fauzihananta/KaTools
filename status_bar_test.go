@@ -35,6 +35,15 @@ func TestDetectStatusBarPercentsRoundsVisuallyFullBarToOneHundred(t *testing.T) 
 	}
 }
 
+func TestStatusBarPixelsDoNotTreatWhiteHUDGlyphsAsBars(t *testing.T) {
+	if isHPBarPixel(255, 255, 255) {
+		t.Fatal("white HUD glyph was treated as a red HP-bar pixel")
+	}
+	if isTPBarPixel(255, 255, 255) {
+		t.Fatal("white HUD glyph was treated as a blue TP-bar pixel")
+	}
+}
+
 func TestDetectStatusBarUsesFullHPLineAsTPWidthReference(t *testing.T) {
 	img := image.NewRGBA(image.Rect(0, 0, 160, 30))
 	// This mimics a real selection with an asymmetric panel frame: the left

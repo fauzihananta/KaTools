@@ -103,6 +103,13 @@ type partyPickerState struct {
 
 	currentX int
 	currentY int
+
+	// A desktop preview must be captured after the translucent picker has been
+	// destroyed, but before the dashboard is brought back to the foreground.
+	// Otherwise BitBlt sees KaTools at the selected desktop coordinates instead
+	// of the game the user just selected from.
+	captureEvidence bool
+	selectedROI     ocrworker.PartyROIConfig
 }
 
 var (
@@ -110,6 +117,8 @@ var (
 	activePicker         *partyPickerState
 	partyPickerClassOnce sync.Once
 	partyPickerClassErr  error
+	kaToolsWindowMu      sync.RWMutex
+	kaToolsWindow        windows.Handle
 
 	// Windows retains this callback pointer for the lifetime of the registered
 	// class. It must not be a local variable in runPartyROIPicker, otherwise a
@@ -191,9 +200,33 @@ func openROIPicker(targetHWND windows.Handle, kind string) error {
 }
 
 func focusPickerTargetWindow(targetHWND windows.Handle) {
+	focusWindow(targetHWND)
+}
+
+// setKaToolsWindow records the native dashboard window while it is alive. The
+// ROI picker uses this to return the user to KaTools after its overlay closes.
+func setKaToolsWindow(hwnd windows.Handle) {
+	kaToolsWindowMu.Lock()
+	kaToolsWindow = hwnd
+	kaToolsWindowMu.Unlock()
+}
+
+func refocusKaToolsWindow() {
+	kaToolsWindowMu.RLock()
+	hwnd := kaToolsWindow
+	kaToolsWindowMu.RUnlock()
+
+	if hwnd == 0 || !isWindowValid(uintptr(hwnd)) {
+		return
+	}
+
+	focusWindow(hwnd)
+}
+
+func focusWindow(targetHWND windows.Handle) {
 	// Windows normally blocks a background process from stealing focus. The
 	// picker was explicitly requested by the user, so temporarily join the
-	// foreground input queue before asking Windows to activate Kathana.
+	// foreground input queue before asking Windows to activate its window.
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 
@@ -218,7 +251,7 @@ func focusPickerTargetWindow(targetHWND windows.Handle) {
 		defer attachThreadInput.Call(currentThread, foregroundThread, 0)
 	}
 
-	// SW_RESTORE also restores a minimized Kathana window before focusing it.
+	// SW_RESTORE also restores a minimized picker target before focusing it.
 	for attempt := 0; attempt < 3; attempt++ {
 		showWindow.Call(uintptr(targetHWND), 9)
 		bringWindowToTop.Call(uintptr(targetHWND))
@@ -251,6 +284,13 @@ func runPartyROIPicker(
 		}
 
 		partyPickerMu.Unlock()
+
+		capturePickerEvidence(state)
+
+		// The picker temporarily activates Kathana so the user can select an
+		// area. Return to the dashboard only after the selected game pixels have
+		// been captured for the preview and WGC comparison.
+		refocusKaToolsWindow()
 	}()
 
 	user32 := windows.NewLazySystemDLL("user32.dll")
@@ -573,33 +613,14 @@ func partyPickerWndProc(
 				y2,
 			)
 
-			destroyPickerWindow(hwnd)
-
 			if saved {
-				// Capture setelah overlay ditutup agar garis picker tidak
-				// muncul pada screenshot area terpilih.
-				go func(targetRect pickerRECT, selected ocrworker.PartyROIConfig, kind string) {
-					time.Sleep(80 * time.Millisecond)
-					var err error
-					if kind == "status" {
-						err = captureStatusROIPreview(targetRect, selected)
-					} else if kind == "target" {
-						err = captureTargetROIPreview(targetRect, selected)
-					} else if kind == "death" {
-						err = captureDeathROIPreview(targetRect, selected)
-					} else {
-						err = capturePartyROIPreview(targetRect, selected)
-					}
-					if err != nil {
-						fmt.Println("[ROI Picker] Preview capture failed:", err)
-					}
-					if globalRuntimeManager != nil {
-						if err := globalRuntimeManager.CaptureWGCROISnapshot(kind, selected); err != nil {
-							fmt.Println("[WGC Snapshot]", err)
-						}
-					}
-				}(state.targetRect, roi, state.kind)
+				state.mu.Lock()
+				state.captureEvidence = true
+				state.selectedROI = roi
+				state.mu.Unlock()
 			}
+
+			destroyPickerWindow(hwnd)
 
 			return 0
 		}
@@ -656,6 +677,47 @@ func partyPickerWndProc(
 		wParam,
 		lParam,
 	)
+}
+
+// capturePickerEvidence runs from runPartyROIPicker's teardown path.  At that
+// point the overlay is gone but the game is still foreground, so the desktop
+// preview cannot accidentally contain the KaTools dashboard.
+func capturePickerEvidence(state *partyPickerState) {
+	if state == nil {
+		return
+	}
+
+	state.mu.Lock()
+	capture := state.captureEvidence
+	selected := state.selectedROI
+	targetRect := state.targetRect
+	kind := state.kind
+	state.mu.Unlock()
+	if !capture {
+		return
+	}
+
+	// Let DWM present the destroyed overlay before taking the desktop preview.
+	time.Sleep(80 * time.Millisecond)
+
+	var err error
+	if kind == "status" {
+		err = captureStatusROIPreview(targetRect, selected)
+	} else if kind == "target" {
+		err = captureTargetROIPreview(targetRect, selected)
+	} else if kind == "death" {
+		err = captureDeathROIPreview(targetRect, selected)
+	} else {
+		err = capturePartyROIPreview(targetRect, selected)
+	}
+	if err != nil {
+		fmt.Println("[ROI Picker] Preview capture failed:", err)
+	}
+	if globalRuntimeManager != nil {
+		if err := globalRuntimeManager.CaptureWGCROISnapshot(kind, selected); err != nil {
+			fmt.Println("[WGC Snapshot]", err)
+		}
+	}
 }
 
 func getPickerState(

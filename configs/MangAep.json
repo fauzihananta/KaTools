@@ -1,0 +1,247 @@
+{
+  "hwnd": "",
+  "autoAcceptEnabled": false,
+  "autoPauseDeathEnabled": true,
+  "autoResurrectEnabled": true,
+  "assistSkillVK": 48,
+  "assistSkillDelay": 1,
+  "targetUntilDeadEnabled": true,
+  "targetUntilDeadSupport": false,
+  "targetUntilDeadCharacterName": "Choniokusin",
+  "targetNameFilterMode": "whitelist",
+  "targetEnabled": false,
+  "targetWithoutName": false,
+  "targetDelay": 1,
+  "attackEnabled": false,
+  "attackDelay": 0,
+  "pickEnabled": false,
+  "pickDelay": 0,
+  "autoPotHPEnabled": true,
+  "autoPotHPPercent": 80,
+  "autoPotHPSlotVK": 113,
+  "autoPotTPEnabled": false,
+  "autoPotTPPercent": 0,
+  "autoPotTPSlotVK": 49,
+  "emergencySkills": [
+    {
+      "enabled": true,
+      "vk": 116,
+      "needsTarget": true
+    },
+    {
+      "enabled": true,
+      "vk": 117,
+      "needsTarget": true
+    },
+    {
+      "enabled": true,
+      "vk": 55,
+      "needsTarget": false
+    },
+    {
+      "enabled": true,
+      "vk": 121,
+      "needsTarget": false
+    },
+    {
+      "enabled": false,
+      "vk": 49,
+      "needsTarget": false
+    }
+  ],
+  "assistPanicTarget": false,
+  "skills": [
+    {
+      "name": "1",
+      "vk": 49,
+      "enabled": true,
+      "delay": 1
+    },
+    {
+      "name": "2",
+      "vk": 50,
+      "enabled": true,
+      "delay": 1
+    },
+    {
+      "name": "3",
+      "vk": 51,
+      "enabled": true,
+      "delay": 1
+    },
+    {
+      "name": "4",
+      "vk": 52,
+      "enabled": true,
+      "delay": 2
+    },
+    {
+      "name": "5",
+      "vk": 53,
+      "enabled": false,
+      "delay": 20
+    },
+    {
+      "name": "6",
+      "vk": 54,
+      "enabled": false,
+      "delay": 0
+    },
+    {
+      "name": "7",
+      "vk": 55,
+      "enabled": false,
+      "delay": 0
+    },
+    {
+      "name": "8",
+      "vk": 56,
+      "enabled": true,
+      "delay": 30
+    },
+    {
+      "name": "9",
+      "vk": 57,
+      "enabled": true,
+      "delay": 1
+    },
+    {
+      "name": "0",
+      "vk": 48,
+      "enabled": false,
+      "delay": 0
+    },
+    {
+      "name": "F1",
+      "vk": 112,
+      "enabled": false,
+      "delay": 0
+    },
+    {
+      "name": "F2",
+      "vk": 113,
+      "enabled": false,
+      "delay": 0
+    },
+    {
+      "name": "F3",
+      "vk": 114,
+      "enabled": false,
+      "delay": 1
+    },
+    {
+      "name": "F4",
+      "vk": 115,
+      "enabled": false,
+      "delay": 1
+    },
+    {
+      "name": "F5",
+      "vk": 116,
+      "enabled": false,
+      "delay": 1
+    },
+    {
+      "name": "F6",
+      "vk": 117,
+      "enabled": false,
+      "delay": 1
+    },
+    {
+      "name": "F7",
+      "vk": 118,
+      "enabled": true,
+      "delay": 20
+    },
+    {
+      "name": "F8",
+      "vk": 119,
+      "enabled": true,
+      "delay": 1
+    },
+    {
+      "name": "F9",
+      "vk": 120,
+      "enabled": false,
+      "delay": 0
+    },
+    {
+      "name": "F10",
+      "vk": 121,
+      "enabled": false,
+      "delay": 0
+    }
+  ],
+  "supportSkills": [
+    {
+      "name": "1",
+      "vk": 49,
+      "enabled": true,
+      "delay": 1,
+      "withTarget": false
+    },
+    {
+      "name": "2",
+      "vk": 50,
+      "enabled": true,
+      "delay": 2,
+      "withTarget": false
+    },
+    {
+      "name": "3",
+      "vk": 51,
+      "enabled": true,
+      "delay": 3,
+      "withTarget": false
+    },
+    {
+      "name": "4",
+      "vk": 52,
+      "enabled": false,
+      "delay": 0,
+      "withTarget": false
+    },
+    {
+      "name": "5",
+      "vk": 53,
+      "enabled": false,
+      "delay": 0,
+      "withTarget": false
+    },
+    {
+      "name": "6",
+      "vk": 54,
+      "enabled": false,
+      "delay": 0,
+      "withTarget": false
+    },
+    {
+      "name": "7",
+      "vk": 55,
+      "enabled": false,
+      "delay": 0,
+      "withTarget": false
+    },
+    {
+      "name": "8",
+      "vk": 56,
+      "enabled": false,
+      "delay": 0,
+      "withTarget": false
+    },
+    {
+      "name": "9",
+      "vk": 57,
+      "enabled": false,
+      "delay": 0,
+      "withTarget": false
+    },
+    {
+      "name": "0",
+      "vk": 48,
+      "enabled": false,
+      "delay": 0,
+      "withTarget": false
+    }
+  ]
+}

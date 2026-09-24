@@ -16,6 +16,7 @@ func TestCaptureFPSForConfig(t *testing.T) {
 		{name: "status scanner", cfg: WebBotConfig{AutoPotHPEnabled: true}, want: 10},
 		{name: "death scanner", cfg: WebBotConfig{AutoPauseDeathEnabled: true}, want: 10},
 		{name: "target name scanner", cfg: WebBotConfig{TargetEnabled: true, TargetUntilDeadCharacterName: "Monster"}, want: 10},
+		{name: "target without name ignores saved name list", cfg: WebBotConfig{TargetEnabled: true, TargetNameFilterMode: "none", TargetUntilDeadCharacterName: "Monster"}, want: 1},
 	}
 
 	for _, test := range tests {
@@ -24,6 +25,20 @@ func TestCaptureFPSForConfig(t *testing.T) {
 				t.Fatalf("captureFPSForConfig() = %d, want %d", got, test.want)
 			}
 		})
+	}
+}
+
+func TestTargetNameFilterNoneSkipsNameFilterAndWhitelistValidation(t *testing.T) {
+	cfg := WebBotConfig{
+		TargetEnabled:                true,
+		TargetUntilDeadCharacterName: "Old Filter Name",
+		TargetNameFilterMode:         "none",
+	}
+	if usesTargetNameFilter(cfg) {
+		t.Fatal("Without name must ignore a previously saved name filter")
+	}
+	if requiresTargetNameWhitelist(cfg) {
+		t.Fatal("Without name must not require a whitelist")
 	}
 }
 

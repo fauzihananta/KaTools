@@ -216,8 +216,7 @@ func NewRuntimeManager() *RuntimeManager {
 // when the player uses only key scheduling. Screen-driven features still get
 // ten frames per second, which matches their 100-120 ms scan intervals.
 func captureFPSForConfig(cfg WebBotConfig) int {
-	targetFilterEnabled := cfg.TargetUntilDeadEnabled ||
-		(cfg.TargetEnabled && strings.TrimSpace(cfg.TargetUntilDeadCharacterName) != "")
+	targetFilterEnabled := usesTargetNameFilter(cfg)
 
 	if cfg.AutoAcceptEnabled ||
 		cfg.AutoPotHPEnabled ||
@@ -290,8 +289,7 @@ func (m *RuntimeManager) Start(
 	autoPot := NewAutoPotController(hwnd, cfg)
 	emergency := NewEmergencySkillController(hwnd, cfg)
 	deathPause := NewDeathPauseController(cfg.AutoPauseDeathEnabled, cfg.AutoResurrectEnabled)
-	targetFilterEnabled := cfg.TargetUntilDeadEnabled ||
-		(cfg.TargetEnabled && strings.TrimSpace(cfg.TargetUntilDeadCharacterName) != "")
+	targetFilterEnabled := usesTargetNameFilter(cfg)
 	targetUntil := NewTargetUntilDeadController(
 		cfg.TargetUntilDeadEnabled,
 		targetFilterEnabled,
@@ -447,11 +445,21 @@ func (m *RuntimeManager) Start(
 		)
 	}
 
+	// GetWindowRect includes Windows' invisible resize border.  WGC captures
+	// the visible frame instead, so use DWM's extended frame bounds whenever
+	// available for the coordinate mapping.  This is especially important for
+	// HUDs docked at X=0: treating an invisible 8-9 px border as captured
+	// content clips the first letters of the target name.
+	mappingRect := rect
+	if visibleRect, ok := getVisibleWindowRect(windows.Handle(hwnd)); ok {
+		mappingRect = visibleRect
+	}
+
 	windowWidth :=
-		int(rect.Right - rect.Left)
+		int(mappingRect.Right - mappingRect.Left)
 
 	windowHeight :=
-		int(rect.Bottom - rect.Top)
+		int(mappingRect.Bottom - mappingRect.Top)
 
 	if windowWidth <= 0 ||
 		windowHeight <= 0 {
@@ -486,7 +494,7 @@ func (m *RuntimeManager) Start(
 	frameMapping, err := frameMappingForWindow(
 		reader.width, reader.height,
 		windowWidth, windowHeight,
-		int(clientRect.Left)-int(rect.Left), int(clientRect.Top)-int(rect.Top),
+		int(clientRect.Left)-int(mappingRect.Left), int(clientRect.Top)-int(mappingRect.Top),
 		clientWidth, clientHeight,
 	)
 	if err != nil {
@@ -1499,6 +1507,14 @@ func runPicker(
 		statusROI.Y += statusScanOffset.Y
 		img, ok := reader.ToImageRect(statusROI.X, statusROI.Y, statusROI.Width, statusROI.Height)
 		if !ok {
+			// A status panel docked against a frame edge cannot accommodate every
+			// horizontal probe (for example, X+4 can extend past the right edge).
+			// This is an invalid calibration candidate, not a terminal capture
+			// failure. Advance so the following in-bounds candidate (such as X-4)
+			// can still establish the shared WGC offset.
+			if !captureOffsetCalibrated {
+				captureOffsetSearchIndex++
+			}
 			logStatusDiagnostic(
 				"ROI outside WGC frame | ROI=%d,%d %dx%d | OffsetX=%d OffsetY=%d | Frame=%dx%d | Scale=%.4f,%.4f",
 				statusROI.X, statusROI.Y, statusROI.Width, statusROI.Height,
@@ -2639,6 +2655,13 @@ func runPicker(
 			// ROI is only a cheap red-bar pixel scan (no OCR unless Target Until
 			// Dead's name filter is also enabled).
 			targetMonitorInterval = 100 * time.Millisecond
+		} else if targetUntil.IsFilterEnabled() && !targetUntil.IsEnabled() {
+			// Normal Target with a name filter must wait for one OCR decision
+			// before its attack/skill gate opens. Its panel scan is tiny, and
+			// checking it at 10 Hz removes up to 150 ms of avoidable latency on
+			// low-spec PCs without changing Target Until Dead's conservative
+			// empty-bar confirmation cadence.
+			targetMonitorInterval = 100 * time.Millisecond
 		}
 		if targetMonitorNeeded && time.Since(lastTargetBarAt) >= targetMonitorInterval {
 			targetROI := partyROIToFrame(LoadTargetROI(), scaleX, scaleY, frameOriginX, frameOriginY)
@@ -2715,8 +2738,18 @@ func runPicker(
 							time.Since(lastTargetNameOCRAt) >= targetNameOCRMinInterval {
 							targetNameOCRBusy = true
 							lastTargetNameOCRAt = time.Now()
-							go func(img image.Image, generation, revision uint64) {
-								result, err := targetNameOCR.RunTargetNameImage(targetPanelNameImage(img))
+							// When the first, clean name-only OCR pass already matches the
+							// configured list, do not make a slow machine run the remaining
+							// fallback passes. A non-match remains conservative: every
+							// fallback still runs before Skills/Attack are authorized.
+							earlyMatch := func(text string) bool {
+								if targetUntil.IsWhitelistMode() {
+									return targetTextMatchesWhitelistedName(text, targetUntil.ExcludedNames())
+								}
+								return targetTextMatchesExcludedName(text, targetUntil.ExcludedNames())
+							}
+							go func(img image.Image, generation, revision uint64, earlyMatch func(string) bool) {
+								result, err := targetNameOCR.RunTargetNameImageUntil(targetPanelNameImage(img), earlyMatch)
 								event := targetNameOCREvent{generation: generation, revision: revision, err: err}
 								if result != nil {
 									event.text = result.Text
@@ -2726,13 +2759,31 @@ func runPicker(
 								case targetNameOCRResultCh <- event:
 								case <-stopCh:
 								}
-							}(img, targetGeneration, targetValidationRevision)
+							}(img, targetGeneration, targetValidationRevision, earlyMatch)
 						}
-						if barVisible && !targetNameVerified && !targetNameOCRBusy && !targetValidationStartedAt.IsZero() &&
-							time.Since(targetValidationStartedAt) >= targetValidationTimeout &&
+						// Target Until Dead owns normal re-acquisition through its
+						// empty-bar monitor, so keep its conservative OCR fallback at
+						// three seconds.  Normal Target has no such monitor: its
+						// configured interval must also recover from an unreadable or
+						// temporarily invisible target panel.  Otherwise the scheduler
+						// correctly holds E while validating, but can hold it forever.
+						validationRetryDelay := targetValidationTimeout
+						if !targetUntil.IsEnabled() {
+							if configuredDelay := bot.TargetDelay(); configuredDelay > 0 {
+								validationRetryDelay = configuredDelay
+							}
+						}
+						// Preserve Target Until Dead's existing rule: its OCR fallback
+						// applies only while a live bar is visible, because its own
+						// empty-bar monitor handles a dead/absent target.  Normal Target
+						// needs the absent-panel case too, otherwise a failed WGC crop
+						// leaves its regular E scheduler gated forever.
+						fallbackEligible := barVisible || !targetUntil.IsEnabled()
+						if fallbackEligible && !targetNameVerified && !targetNameOCRBusy && !targetValidationStartedAt.IsZero() &&
+							time.Since(targetValidationStartedAt) >= validationRetryDelay &&
 							targetUntil.ForceRetarget() {
 							bot.CastTarget()
-							appendOCRLog("TARGET VALIDATION | Name unavailable | Target sent")
+							appendOCRLog("TARGET VALIDATION | Name unavailable after %s | Target sent", validationRetryDelay)
 						}
 						if !barVisible {
 							targetIsOwnCharacter = false
@@ -2786,35 +2837,47 @@ func getWindowRect(
 			"user32.dll",
 		)
 
-	getClientRect := user32.NewProc("GetClientRect")
-	clientToScreen := user32.NewProc("ClientToScreen")
+	getWindowRect := user32.NewProc("GetWindowRect")
 
-	var client RECT
-	if ret, _, err := getClientRect.Call(
-		uintptr(hwnd), uintptr(unsafe.Pointer(&client)),
+	// This must be the full top-level window rectangle.  The ROI picker uses
+	// getPickerWindowRect for client coordinates; frameMappingForWindow needs
+	// both rectangles to tell whether WGC captured client content or the whole
+	// window.  Calling GetClientRect here made both inputs identical and caused
+	// a scaled-but-offset full-window WGC frame to be treated as client content.
+	var rect RECT
+	if ret, _, err := getWindowRect.Call(
+		uintptr(hwnd), uintptr(unsafe.Pointer(&rect)),
 	); ret == 0 {
-		return RECT{}, fmt.Errorf("GetClientRect failed: %v", err)
+		return RECT{}, fmt.Errorf("GetWindowRect failed: %v", err)
 	}
 
-	topLeft := POINT{X: client.Left, Y: client.Top}
-	bottomRight := POINT{X: client.Right, Y: client.Bottom}
-	if ret, _, err := clientToScreen.Call(
-		uintptr(hwnd), uintptr(unsafe.Pointer(&topLeft)),
-	); ret == 0 {
-		return RECT{}, fmt.Errorf("ClientToScreen (top left) failed: %v", err)
-	}
-	if ret, _, err := clientToScreen.Call(
-		uintptr(hwnd), uintptr(unsafe.Pointer(&bottomRight)),
-	); ret == 0 {
-		return RECT{}, fmt.Errorf("ClientToScreen (bottom right) failed: %v", err)
+	return rect, nil
+}
+
+// getVisibleWindowRect returns the DWM-composited frame bounds.  GetWindowRect
+// includes an invisible resize border on modern Windows, while WGC's window
+// item does not.  Falling back to GetWindowRect keeps this compatible with
+// older systems where DWM does not expose the attribute.
+func getVisibleWindowRect(hwnd windows.Handle) (RECT, bool) {
+	if hwnd == 0 {
+		return RECT{}, false
 	}
 
-	return RECT{
-		Left:   topLeft.X,
-		Top:    topLeft.Y,
-		Right:  bottomRight.X,
-		Bottom: bottomRight.Y,
-	}, nil
+	dwmapi := windows.NewLazySystemDLL("dwmapi.dll")
+	getWindowAttribute := dwmapi.NewProc("DwmGetWindowAttribute")
+	const dwmwaExtendedFrameBounds = 9
+
+	var rect RECT
+	ret, _, _ := getWindowAttribute.Call(
+		uintptr(hwnd),
+		uintptr(dwmwaExtendedFrameBounds),
+		uintptr(unsafe.Pointer(&rect)),
+		uintptr(unsafe.Sizeof(rect)),
+	)
+	if int32(ret) != 0 || rect.Right <= rect.Left || rect.Bottom <= rect.Top {
+		return RECT{}, false
+	}
+	return rect, true
 }
 
 // ============================================================

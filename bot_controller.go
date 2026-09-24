@@ -252,6 +252,15 @@ func (b *BotController) TargetActionsReady() bool {
 	return b.areTargetActionsReady()
 }
 
+// TargetDelay exposes the active normal Target interval to the screen monitor.
+// The monitor uses it only as a retry deadline when normal Target's name OCR
+// cannot establish a result; Target Until Dead keeps its independent cadence.
+func (b *BotController) TargetDelay() time.Duration {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.config.TargetDelay
+}
+
 func (b *BotController) holdTargetActionsAfterTarget() {
 	b.mu.Lock()
 	if b.targetActionFilterEnabled {

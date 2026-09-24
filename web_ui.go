@@ -47,35 +47,35 @@ body {
 	background: #111827;
 	color: #f3f4f6;
 	margin: 0;
-	padding: 18px;
+	padding: 12px;
 }
 
 .container {
-	width: 900px;
+	width: 840px;
 	max-width: 100%;
 	margin: auto;
 	background: #1f2937;
-	padding: 18px 22px;
-	border-radius: 12px;
+	padding: 14px 16px;
+	border-radius: 10px;
 }
 
 h1 {
-	margin: 0 0 12px 0;
-	font-size: 25px;
+	margin: 0 0 8px 0;
+	font-size: 22px;
 }
 
 .app-header {
 	position: sticky;
 	top: 0;
 	z-index: 20;
-	margin: -18px -22px 14px;
-	padding: 18px 22px 0;
+	margin: -14px -16px 10px;
+	padding: 14px 16px 0;
 	background: #1f2937;
 }
 
 h2 {
-	margin: 0 0 10px 0;
-	font-size: 19px;
+	margin: 0 0 7px 0;
+	font-size: 17px;
 }
 
 .status {
@@ -99,12 +99,12 @@ h2 {
 }
 
 .section {
-	margin-top: 14px;
+	margin-top: 10px;
 }
 
 .window-panel {
 	background: #374151;
-	padding: 10px;
+	padding: 8px;
 	border-radius: 8px;
 }
 
@@ -116,7 +116,7 @@ h2 {
 
 .window-select {
 	width: 100%;
-	padding: 9px 10px;
+	padding: 7px 9px;
 	border-radius: 6px;
 	border: 1px solid #4b5563;
 	background: #111827;
@@ -127,12 +127,34 @@ h2 {
 .refresh-button {
 	width: auto;
 	margin-top: 0;
-	padding: 9px 14px;
+	padding: 7px 11px;
 	background: #4b5563;
 }
 
 .refresh-button:hover {
 	background: #6b7280;
+}
+
+.refresh-button.loading {
+	cursor: progress;
+	opacity: 0.8;
+}
+
+.refresh-button.loading::before {
+	content: "";
+	display: inline-block;
+	width: 11px;
+	height: 11px;
+	margin-right: 6px;
+	vertical-align: -1px;
+	border: 2px solid rgba(255, 255, 255, 0.35);
+	border-top-color: #fff;
+	border-radius: 50%;
+	animation: refresh-spin 0.7s linear infinite;
+}
+
+@keyframes refresh-spin {
+	to { transform: rotate(360deg); }
 }
 
 .window-info {
@@ -150,7 +172,7 @@ h2 {
 .actions-grid {
 	display: grid;
 	grid-template-columns: repeat(3, 1fr);
-	gap: 8px;
+	gap: 6px;
 }
 
 .action-card {
@@ -159,7 +181,7 @@ h2 {
 	align-items: center;
 	gap: 6px;
 	background: #374151;
-	padding: 7px 8px;
+	padding: 6px 7px;
 	border-radius: 7px;
 }
 
@@ -187,16 +209,16 @@ input[type="text"].numeric-input {
 .skills-grid {
 	display: grid;
 	grid-template-columns: repeat(5, 1fr);
-	gap: 7px;
+	gap: 6px;
 }
 
 .skill-card {
 	display: grid;
 	grid-template-columns: auto auto 54px;
 	align-items: center;
-	gap: 6px;
+	gap: 5px;
 	background: #374151;
-	padding: 6px 8px;
+	padding: 5px 6px;
 	border-radius: 7px;
 }
 
@@ -224,9 +246,9 @@ input[type="text"].numeric-input {
 	display: grid;
 	grid-template-columns: auto auto 54px minmax(0, 1fr);
 	align-items: center;
-	gap: 6px;
+	gap: 5px;
 	background: #374151;
-	padding: 6px 8px;
+	padding: 5px 6px;
 	border-radius: 7px;
 }
 
@@ -242,14 +264,14 @@ input[type="text"].numeric-input {
 
 button {
 	width: 100%;
-	padding: 10px;
+	padding: 8px;
 	border: none;
 	border-radius: 7px;
 	color: white;
-	font-size: 15px;
+	font-size: 14px;
 	font-weight: bold;
 	cursor: pointer;
-	margin-top: 15px;
+	margin-top: 10px;
 }
 
 button:disabled {
@@ -298,6 +320,66 @@ button:disabled:hover {
 
 .config-actions button:hover {
 	background: #6b7280;
+}
+
+.config-profile-modal {
+	position: fixed;
+	inset: 0;
+	z-index: 100;
+	display: grid;
+	place-items: center;
+	padding: 18px;
+	background: rgba(3, 7, 18, 0.72);
+}
+
+.config-profile-modal[hidden] {
+	display: none;
+}
+
+.config-profile-dialog {
+	width: min(100%, 360px);
+	padding: 18px;
+	border: 1px solid #4b5563;
+	border-radius: 10px;
+	background: #1f2937;
+	box-shadow: 0 20px 45px rgba(0, 0, 0, 0.45);
+}
+
+.config-profile-dialog h2 {
+	margin-bottom: 6px;
+}
+
+.config-profile-dialog p {
+	margin: 0 0 14px;
+	color: #9ca3af;
+	font-size: 13px;
+}
+
+.config-profile-dialog input,
+.config-profile-dialog select {
+	width: 100%;
+	padding: 9px 10px;
+	border: 1px solid #4b5563;
+	border-radius: 6px;
+	background: #111827;
+	color: white;
+	font-size: 14px;
+}
+
+.config-profile-dialog-actions {
+	display: grid;
+	grid-template-columns: 1fr 1fr;
+	gap: 8px;
+	margin-top: 14px;
+}
+
+.config-profile-dialog-actions button {
+	margin: 0;
+	background: #4b5563;
+}
+
+.config-profile-dialog-actions button:last-child {
+	background: #16a34a;
 }
 
 @media (max-width: 750px) {
@@ -359,48 +441,55 @@ button:disabled:hover {
 	display: grid;
 	grid-template-columns: auto minmax(120px, 1fr);
 	align-items: center;
-	gap: 7px;
+	gap: 6px;
 	background: #374151;
-	padding: 7px 8px;
+	padding: 6px 7px;
 	border-radius: 7px;
 }
 
 .target-mode-card {
 	grid-column: 1 / -1;
 	background: #374151;
-	padding: 9px 10px;
+	padding: 7px 8px;
 	border-radius: 7px;
 }
 
 .target-mode-title {
 	font-size: 14px;
 	font-weight: 700;
-	margin-bottom: 8px;
+	margin-bottom: 6px;
 }
 
 .target-mode-options {
 	display: flex;
 	flex-wrap: wrap;
-	gap: 8px;
+	gap: 6px;
 }
 
 .target-mode-option {
 	display: flex;
 	align-items: center;
-	gap: 6px;
-	padding: 6px 9px;
+	gap: 5px;
+	padding: 5px 7px;
 	border: 1px solid #4b5563;
 	border-radius: 6px;
 	font-size: 13px;
 	cursor: pointer;
 }
 
+/* The normal Target-only "Without name" option is hidden for Target Until
+   Dead. This explicit rule is needed because .target-mode-option uses
+   display:flex, which otherwise overrides the browser's default [hidden]. */
+.target-mode-option[hidden] {
+	display: none;
+}
+
 .target-mode-settings {
 	display: grid;
 	grid-template-columns: minmax(150px, 1fr) auto;
 	align-items: center;
-	gap: 8px;
-	margin-top: 9px;
+	gap: 6px;
+	margin-top: 7px;
 }
 
 .target-mode-settings[hidden] {
@@ -479,9 +568,9 @@ button:disabled:hover {
 	display: grid;
 	grid-template-columns: 1fr auto;
 	align-items: center;
-	gap: 10px;
+	gap: 8px;
 	background: #374151;
-	padding: 8px 10px;
+	padding: 7px 8px;
 	border-radius: 7px;
 }
 
@@ -496,16 +585,16 @@ button:disabled:hover {
 .pot-grid {
 	display: grid;
 	grid-template-columns: repeat(2, 1fr);
-	gap: 8px;
+	gap: 6px;
 }
 
 .pot-card {
 	display: grid;
 	grid-template-columns: auto 1fr 80px 100px;
 	align-items: center;
-	gap: 7px;
+	gap: 6px;
 	background: #374151;
-	padding: 8px 10px;
+	padding: 7px 8px;
 	border-radius: 7px;
 }
 
@@ -521,16 +610,16 @@ button:disabled:hover {
 .emergency-grid {
 	display: grid;
 	grid-template-columns: repeat(3, 1fr);
-	gap: 7px;
+	gap: 6px;
 }
 
 .emergency-card {
 	display: grid;
 	grid-template-columns: auto minmax(72px, 1fr) auto;
 	align-items: center;
-	gap: 6px;
+	gap: 5px;
 	background: #374151;
-	padding: 7px 8px;
+	padding: 6px 7px;
 	border-radius: 7px;
 }
 
@@ -555,9 +644,9 @@ button:disabled:hover {
 }
 
 .emergency-panic-row {
-	margin-top: 10px;
+	margin-top: 8px;
 	background: #374151;
-	padding: 8px 10px;
+	padding: 7px 8px;
 	border-radius: 7px;
 	font-size: 13px;
 }
@@ -565,14 +654,14 @@ button:disabled:hover {
 .tab-bar {
 	display: flex;
 	gap: 6px;
-	margin: 0 0 14px;
+	margin: 0 0 10px;
 	border-bottom: 1px solid #4b5563;
 }
 
 .tab-button {
 	border: 0;
 	border-radius: 7px 7px 0 0;
-	padding: 8px 14px;
+	padding: 6px 11px;
 	background: transparent;
 	color: #9ca3af;
 	font-weight: 700;
@@ -645,6 +734,7 @@ button:disabled:hover {
 				</select>
 
 				<button
+					id="refreshWindowsButton"
 					class="refresh-button"
 					onclick="loadWindows()">
 
@@ -844,9 +934,10 @@ button:disabled:hover {
 				<div id="targetSkipNamesSettings" class="target-mode-settings" hidden>
 					<div class="target-name-card">
 						<label>Target Name Filter</label>
-						<div class="target-mode-options">
-							<label class="target-mode-option"><input type="radio" name="targetNameFilterMode" value="skip" checked> Skip listed</label>
-							<label class="target-mode-option"><input type="radio" name="targetNameFilterMode" value="whitelist"> Only attack listed</label>
+					<div class="target-mode-options">
+						<label class="target-mode-option" id="targetWithoutNameOption"><input type="radio" name="targetNameFilterMode" value="none"> Without name</label>
+						<label class="target-mode-option"><input type="radio" name="targetNameFilterMode" value="skip" checked> Skip listed</label>
+						<label class="target-mode-option"><input type="radio" name="targetNameFilterMode" value="whitelist"> Only attack listed</label>
 						</div>
 						<label id="targetNameListLabel" for="targetUntilDeadCharacterName">Skip Target Names</label>
 						<input type="text" id="targetUntilDeadCharacterName" placeholder="Example: MangAep;Dadati" autocomplete="off">
@@ -1066,13 +1157,26 @@ button:disabled:hover {
 	</button>
 
 	<div class="config-actions">
-		<button type="button" onclick="saveCurrentConfig()">SAVE CONFIG</button>
-		<button type="button" onclick="loadSavedConfig(true)">LOAD CONFIG</button>
+		<button type="button" onclick="openSaveConfigDialog()">SAVE CONFIG</button>
+		<button type="button" onclick="openLoadConfigDialog()">LOAD CONFIG</button>
 	</div>
 
 	<div class="hint">
 		Delays are in seconds. Config is saved only when SAVE CONFIG is pressed.
 	</div>
+	</div>
+
+	<div id="configProfileModal" class="config-profile-modal" hidden>
+		<div class="config-profile-dialog" role="dialog" aria-modal="true" aria-labelledby="configProfileTitle">
+			<h2 id="configProfileTitle">Save Character Config</h2>
+			<p id="configProfileHint">Enter the character name for this config.</p>
+			<input id="configProfileName" type="text" maxlength="48" autocomplete="off" placeholder="Character name">
+			<select id="configProfileList" hidden></select>
+			<div class="config-profile-dialog-actions">
+				<button type="button" onclick="closeConfigProfileDialog()">CANCEL</button>
+				<button id="configProfileConfirm" type="button" onclick="confirmConfigProfileDialog()">SAVE</button>
+			</div>
+		</div>
 	</div>
 
 	<div id="emergencyTab" class="tab-panel">
@@ -1102,6 +1206,7 @@ const emergencySkillOptions = [
 
 let botRuntimeActive = false;
 let targetROIReady = false;
+let windowsLoading = false;
 
 function showTab(tabName) {
 	for (const panel of document.querySelectorAll(".tab-panel")) {
@@ -1691,7 +1796,9 @@ function applySavedConfig(config) {
 	document.getElementById("targetDelay").value = config.targetDelay || "";
 	document.getElementById("targetUntilDeadCharacterName").value =
 		config.targetUntilDeadCharacterName || "";
-	setTargetNameFilterMode(config.targetNameFilterMode || "skip");
+	// targetWithoutName was used by a short-lived separate Target mode. Keep
+	// those saved presets compatible by showing the equivalent filter choice.
+	setTargetNameFilterMode(config.targetWithoutName ? "none" : (config.targetNameFilterMode || "skip"));
 	syncTargetMode();
 	document.getElementById("attack").checked = !!config.attackEnabled;
 	document.getElementById("attackDelay").value = config.attackDelay || "";
@@ -1729,42 +1836,168 @@ function applySavedConfig(config) {
 	syncTargetMode();
 }
 
-async function saveCurrentConfig() {
+let configProfileDialogMode = "";
+let configProfileNames = [];
+
+async function getConfigProfileNames() {
+	const response = await fetch("/api/config/profiles");
+	const result = await response.json();
+	if (!result.success) {
+		throw new Error(result.message || "Failed to load config profiles.");
+	}
+	return {
+		profiles: result.profiles || [],
+		legacyFound: !!result.legacyFound
+	};
+}
+
+function closeConfigProfileDialog() {
+	const modal = document.getElementById("configProfileModal");
+	modal.hidden = true;
+	configProfileDialogMode = "";
+}
+
+function openSaveConfigDialog() {
+	configProfileDialogMode = "save";
+	const modal = document.getElementById("configProfileModal");
+	const input = document.getElementById("configProfileName");
+	const list = document.getElementById("configProfileList");
+	document.getElementById("configProfileTitle").innerText = "Save Character Config";
+	document.getElementById("configProfileHint").innerText = "Enter the character name for this config.";
+	document.getElementById("configProfileConfirm").innerText = "SAVE";
+	list.hidden = true;
+	input.hidden = false;
+	input.value = "";
+	modal.hidden = false;
+	input.focus();
+}
+
+async function openLoadConfigDialog() {
+	try {
+		const configProfiles = await getConfigProfileNames();
+		configProfileNames = configProfiles.profiles;
+		if (configProfiles.legacyFound) {
+			configProfileNames.push("__legacy__");
+		}
+	} catch (error) {
+		console.error("Failed to list config profiles", error);
+		alert(error.message || "Failed to load config profiles.");
+		return;
+	}
+	if (configProfileNames.length === 0) {
+		alert("No character configs have been saved yet.");
+		return;
+	}
+
+	configProfileDialogMode = "load";
+	const modal = document.getElementById("configProfileModal");
+	const input = document.getElementById("configProfileName");
+	const list = document.getElementById("configProfileList");
+	document.getElementById("configProfileTitle").innerText = "Load Character Config";
+	document.getElementById("configProfileHint").innerText = "Choose a saved character config.";
+	document.getElementById("configProfileConfirm").innerText = "LOAD";
+	input.hidden = true;
+	list.hidden = false;
+	list.replaceChildren();
+	for (const name of configProfileNames) {
+		const option = document.createElement("option");
+		option.value = name;
+		option.textContent = name === "__legacy__" ? "Default (katools_config.json)" : name;
+		list.appendChild(option);
+	}
+	modal.hidden = false;
+	list.focus();
+}
+
+async function confirmConfigProfileDialog() {
+	if (configProfileDialogMode === "save") {
+		const name = document.getElementById("configProfileName").value.trim();
+		if (!name) {
+			alert("Enter a character name.");
+			return;
+		}
+		try {
+			const configProfiles = await getConfigProfileNames();
+			configProfileNames = configProfiles.profiles;
+		} catch (error) {
+			console.error("Failed to list config profiles", error);
+			alert(error.message || "Failed to save config.");
+			return;
+		}
+		if (configProfileNames.some(function(profileName) { return profileName.toLowerCase() === name.toLowerCase(); }) &&
+			!confirm('Replace the saved config for "' + name + '"?')) {
+			return;
+		}
+		await saveCurrentConfig(name);
+		return;
+	}
+
+	if (configProfileDialogMode === "load") {
+		const name = document.getElementById("configProfileList").value;
+		if (name) {
+			await loadSavedConfig(name);
+		}
+	}
+}
+
+// The profile dialog is not a form, so browsers do not provide an implicit
+// submit action for its text input. Let Enter perform the same save/load as
+// the visible confirmation button, while keeping Escape as the quick cancel.
+document.getElementById("configProfileModal").addEventListener("keydown", function(event) {
+	if (event.isComposing) {
+		return;
+	}
+	if (event.key === "Escape") {
+		event.preventDefault();
+		closeConfigProfileDialog();
+		return;
+	}
+	if (event.key === "Enter") {
+		event.preventDefault();
+		confirmConfigProfileDialog();
+	}
+});
+
+async function saveCurrentConfig(profileName) {
 	const config = getConfig();
 	if (!validNumericConfig(config, true)) {
 		return;
 	}
 	try {
-		const response = await fetch("/api/config/save", {
+		const response = await fetch("/api/config/profile", {
 			method: "POST",
 			headers: { "Content-Type": "application/json" },
-			body: JSON.stringify(config)
+			body: JSON.stringify({ name: profileName, config: config })
 		});
 		const result = await response.json();
 		if (!result.success) {
 			alert(result.message || "Failed to save config.");
 			return;
 		}
-		alert("Config saved.");
+		closeConfigProfileDialog();
+		alert('Config for "' + result.name + '" saved.');
 	} catch (error) {
 		console.error("Failed to save config", error);
 		alert("Failed to save config.");
 	}
 }
 
-async function loadSavedConfig(showMessage) {
+async function loadSavedConfig(profileName) {
 	try {
-		const response = await fetch("/api/config");
+		const legacyConfig = profileName === "__legacy__";
+		const response = await fetch(legacyConfig ? "/api/config" : "/api/config/profile?name=" + encodeURIComponent(profileName));
 		const result = await response.json();
 		if (result.success && result.found) {
 			applySavedConfig(result.config);
 			await loadWindows();
-			if (showMessage) alert("Saved config loaded.");
-		} else if (showMessage) {
-			alert("No saved config found.");
+			closeConfigProfileDialog();
+			alert(legacyConfig ? "Default config loaded." : 'Config for "' + result.name + '" loaded.');
+		} else {
+			alert("Saved character config was not found.");
 		}
 	} catch (error) {
 		console.error("Failed to load saved config", error);
+		alert("Failed to load character config.");
 	}
 }
 
@@ -1914,6 +2147,15 @@ function updateWindowDependentControls() {
 }
 
 async function loadWindows() {
+	if (windowsLoading) {
+		return;
+	}
+	const refreshButton = document.getElementById("refreshWindowsButton");
+	windowsLoading = true;
+	refreshButton.disabled = true;
+	refreshButton.classList.add("loading");
+	refreshButton.setAttribute("aria-busy", "true");
+	refreshButton.textContent = "REFRESHING...";
 
 	try {
 
@@ -2007,6 +2249,12 @@ async function loadWindows() {
 			"Failed to load windows."
 		);
 
+	} finally {
+		windowsLoading = false;
+		refreshButton.disabled = false;
+		refreshButton.classList.remove("loading");
+		refreshButton.removeAttribute("aria-busy");
+		refreshButton.textContent = "REFRESH";
 	}
 }
 
@@ -2151,18 +2399,23 @@ function getTargetNameFilterMode() {
 }
 
 function setTargetNameFilterMode(mode) {
-	const value = mode === "whitelist" ? "whitelist" : "skip";
+	const value = mode === "whitelist" || mode === "none" ? mode : "skip";
 	const radio = document.querySelector('input[name="targetNameFilterMode"][value="' + value + '"]');
 	if (radio) radio.checked = true;
 }
 
 function syncTargetNameFilterMode() {
-	const whitelist = getTargetNameFilterMode() === "whitelist";
+	const filterMode = getTargetNameFilterMode();
+	const withoutName = filterMode === "none";
+	const whitelist = filterMode === "whitelist";
 	document.getElementById("targetNameListLabel").textContent = whitelist ? "Whitelist Target Names" : "Skip Target Names";
 	document.getElementById("targetUntilDeadCharacterName").placeholder = whitelist ? "Example: Vasabhum;Zarku Rudhira" : "Example: MangAep;Dadati";
 	document.getElementById("targetNameListHint").textContent = whitelist
 		? "Only names on this list may be attacked. Required for Target and Target Until Dead. Separate names with a semicolon."
 		: "Optional for Target. Required for Target Until Dead. Separate names with a semicolon.";
+	document.getElementById("targetNameListLabel").hidden = withoutName;
+	document.getElementById("targetUntilDeadCharacterName").hidden = withoutName;
+	document.getElementById("targetNameListHint").hidden = withoutName;
 }
 
 function syncTargetMode() {
@@ -2172,6 +2425,12 @@ function syncTargetMode() {
 	const mode = getTargetMode();
 	const supportMode = mode === "until" && getTargetUntilRole() === "support";
 	const usesSkipNames = mode === "normal" || mode === "until";
+	// Target Until Dead always identifies names. If a user switches from
+	// Target > Without name, restore a real filter before enabling it.
+	if (mode === "until" && getTargetNameFilterMode() === "none") {
+		setTargetNameFilterMode("skip");
+	}
+	const usesNameList = mode === "until" || (mode === "normal" && getTargetNameFilterMode() !== "none");
 	document.getElementById("assistSkillSlot").disabled = !windowReady || mode !== "assist";
 	document.getElementById("assistSkillDelay").disabled = !windowReady || mode !== "assist";
 	const delay = document.getElementById("targetDelay");
@@ -2179,7 +2438,7 @@ function syncTargetMode() {
 	document.getElementById("targetAssistSettings").hidden = mode !== "assist";
 	document.getElementById("targetNormalSettings").hidden = mode !== "normal";
 	document.getElementById("targetSkipNamesSettings").hidden = !usesSkipNames;
-	document.getElementById("targetUntilDeadCharacterName").disabled = !windowReady || !usesSkipNames;
+	document.getElementById("targetUntilDeadCharacterName").disabled = !windowReady || !usesNameList;
 	document.getElementById("targetUntilSettings").hidden = mode !== "until";
 	document.getElementById("targetSupportSkills").hidden = !supportMode;
 	document.getElementById("normalNumberSkillsSection").hidden = supportMode;
@@ -2188,8 +2447,9 @@ function syncTargetMode() {
 		role.disabled = !windowReady || mode !== "until";
 	}
 	for (const filterMode of document.querySelectorAll('input[name="targetNameFilterMode"]')) {
-		filterMode.disabled = !windowReady || !usesSkipNames;
+		filterMode.disabled = !windowReady || !usesSkipNames || (mode === "until" && filterMode.value === "none");
 	}
+	document.getElementById("targetWithoutNameOption").hidden = mode !== "normal";
 	syncTargetNameFilterMode();
 	// Keep the saved Attack checkbox intact for Attacker mode, but do not allow
 	// R to compete with Support Skills while Support is selected.
@@ -2562,8 +2822,9 @@ type WebBotConfig struct {
 	TargetUntilDeadCharacterName string  `json:"targetUntilDeadCharacterName"`
 	TargetNameFilterMode         string  `json:"targetNameFilterMode"`
 
-	TargetEnabled bool    `json:"targetEnabled"`
-	TargetDelay   float64 `json:"targetDelay"`
+	TargetEnabled     bool    `json:"targetEnabled"`
+	TargetWithoutName bool    `json:"targetWithoutName"`
+	TargetDelay       float64 `json:"targetDelay"`
 
 	AttackEnabled bool    `json:"attackEnabled"`
 	AttackDelay   float64 `json:"attackDelay"`
@@ -2585,6 +2846,24 @@ type WebBotConfig struct {
 	// switching roles never overwrites an existing working attacker setup.
 	Skills        []WebSkillConfig        `json:"skills"`
 	SupportSkills []WebSupportSkillConfig `json:"supportSkills"`
+}
+
+// usesTargetNameFilter is deliberately false for Target without name even
+// when a previous filtered profile left names in the text box. This mode is a
+// key-only target loop: it must neither need a Target ROI nor hold skills for
+// target-name OCR.
+func usesTargetNameFilter(cfg WebBotConfig) bool {
+	withoutName := cfg.TargetWithoutName || strings.EqualFold(strings.TrimSpace(cfg.TargetNameFilterMode), "none")
+	return cfg.TargetUntilDeadEnabled ||
+		(cfg.TargetEnabled && !withoutName && strings.TrimSpace(cfg.TargetUntilDeadCharacterName) != "")
+}
+
+func requiresTargetNameWhitelist(cfg WebBotConfig) bool {
+	withoutName := cfg.TargetWithoutName || strings.EqualFold(strings.TrimSpace(cfg.TargetNameFilterMode), "none")
+	usesNameList := cfg.TargetUntilDeadEnabled || (cfg.TargetEnabled && !withoutName)
+	return usesNameList &&
+		normalizeTargetNameFilterMode(cfg.TargetNameFilterMode) == targetNameFilterModeWhitelist &&
+		strings.TrimSpace(cfg.TargetUntilDeadCharacterName) == ""
 }
 
 type WebEmergencySkillConfig struct {
@@ -3261,6 +3540,77 @@ func newWebUIMux(
 	// LIVE CONFIG
 	// ========================================================
 
+	// Named character profiles are separate from the legacy single config.
+	mux.HandleFunc("/api/config/profiles", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		profiles, err := listWebConfigProfiles()
+		if err != nil {
+			writeJSONError(w, err.Error())
+			return
+		}
+		_, legacyFound, err := loadSavedWebConfig()
+		if err != nil {
+			writeJSONError(w, err.Error())
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success":     true,
+			"profiles":    profiles,
+			"legacyFound": legacyFound,
+		})
+	})
+
+	mux.HandleFunc("/api/config/profile", func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			name := r.URL.Query().Get("name")
+			cfg, found, err := loadProfileWebConfig(name)
+			if err != nil {
+				writeJSONError(w, err.Error())
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"success": true,
+				"found":   found,
+				"name":    name,
+				"config":  cfg,
+			})
+
+		case http.MethodPost:
+			var request struct {
+				Name   string       `json:"name"`
+				Config WebBotConfig `json:"config"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+				writeJSONError(w, "Invalid JSON: "+err.Error())
+				return
+			}
+			if message := validateNumericConfig(request.Config); message != "" {
+				writeJSONError(w, message)
+				return
+			}
+			name, err := saveProfileWebConfig(request.Name, request.Config)
+			if err != nil {
+				writeJSONError(w, err.Error())
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"success": true,
+				"name":    name,
+			})
+
+		default:
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		}
+	})
+
 	mux.HandleFunc(
 		"/api/config",
 		func(w http.ResponseWriter, r *http.Request) {
@@ -3319,14 +3669,11 @@ func newWebUIMux(
 				writeJSONError(w, message)
 				return
 			}
-			targetNameFilterEnabled := cfg.TargetUntilDeadEnabled ||
-				(cfg.TargetEnabled && strings.TrimSpace(cfg.TargetUntilDeadCharacterName) != "")
-			if targetNameFilterEnabled && !LoadTargetROI().Selected {
+			if usesTargetNameFilter(cfg) && !LoadTargetROI().Selected {
 				writeJSONError(w, "Select the target name and HP bar before using Target Name Filter or Target Until Dead.")
 				return
 			}
-			if normalizeTargetNameFilterMode(cfg.TargetNameFilterMode) == targetNameFilterModeWhitelist &&
-				(cfg.TargetEnabled || cfg.TargetUntilDeadEnabled) && strings.TrimSpace(cfg.TargetUntilDeadCharacterName) == "" {
+			if requiresTargetNameWhitelist(cfg) {
 				writeJSONError(w, "Enter one or more whitelist target names before enabling Target or Target Until Dead.")
 				return
 			}
@@ -3466,9 +3813,7 @@ func newWebUIMux(
 				return
 			}
 
-			targetNameFilterEnabled := cfg.TargetUntilDeadEnabled ||
-				(cfg.TargetEnabled && strings.TrimSpace(cfg.TargetUntilDeadCharacterName) != "")
-			if targetNameFilterEnabled && !LoadTargetROI().Selected {
+			if usesTargetNameFilter(cfg) && !LoadTargetROI().Selected {
 				writeJSONError(
 					w,
 					"Select the target name and HP bar before using Target Name Filter or Target Until Dead.",
@@ -3476,8 +3821,7 @@ func newWebUIMux(
 				return
 			}
 
-			if normalizeTargetNameFilterMode(cfg.TargetNameFilterMode) == targetNameFilterModeWhitelist &&
-				(cfg.TargetEnabled || cfg.TargetUntilDeadEnabled) && strings.TrimSpace(cfg.TargetUntilDeadCharacterName) == "" {
+			if requiresTargetNameWhitelist(cfg) {
 				writeJSONError(
 					w,
 					"Enter one or more whitelist target names before enabling Target or Target Until Dead.",
@@ -3660,8 +4004,7 @@ func applyWebBotConfig(
 	autoPot.Update(cfg)
 	emergency.Update(cfg)
 	deathPause.Update(cfg.AutoPauseDeathEnabled, cfg.AutoResurrectEnabled)
-	targetFilterEnabled := cfg.TargetUntilDeadEnabled ||
-		(cfg.TargetEnabled && strings.TrimSpace(cfg.TargetUntilDeadCharacterName) != "")
+	targetFilterEnabled := usesTargetNameFilter(cfg)
 	supportMode := cfg.TargetUntilDeadEnabled && cfg.TargetUntilDeadSupport
 	targetUntil.Update(
 		cfg.TargetUntilDeadEnabled,
