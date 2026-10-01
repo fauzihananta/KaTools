@@ -6,6 +6,7 @@ import (
 	"image"
 	"image/png"
 	"os"
+	"strings"
 	"sync"
 	"unsafe"
 
@@ -49,6 +50,11 @@ var partyROIPreview roiPreviewCache
 var statusROIPreview roiPreviewCache
 var deathROIPreview roiPreviewCache
 var targetROIPreview roiPreviewCache
+var clickPopupScanPreviews = map[string]*roiPreviewCache{
+	"party": {},
+	"death": {},
+	"dc":    {},
+}
 
 func getPartyROIPreview() ([]byte, bool) {
 	return getROIPreview(&partyROIPreview, "party")
@@ -64,6 +70,25 @@ func getDeathROIPreview() ([]byte, bool) {
 
 func getTargetROIPreview() ([]byte, bool) {
 	return getROIPreview(&targetROIPreview, "target")
+}
+
+func clickPopupScanPreviewKind(kind string) string {
+	if !strings.HasPrefix(kind, "click-popup:") {
+		return ""
+	}
+	name := strings.TrimPrefix(kind, "click-popup:")
+	if !validClickPopupScanKind(name) {
+		return ""
+	}
+	return name
+}
+
+func getClickPopupScanROIPreview(kind string) ([]byte, bool) {
+	name := clickPopupScanPreviewKind(kind)
+	if name == "" {
+		return nil, false
+	}
+	return getROIPreview(clickPopupScanPreviews[name], kind)
 }
 
 func clearROIPreview(kind string) {
@@ -88,12 +113,15 @@ func roiPreviewForKind(kind string) *roiPreviewCache {
 	case "target":
 		return &targetROIPreview
 	default:
+		if name := clickPopupScanPreviewKind(kind); name != "" {
+			return clickPopupScanPreviews[name]
+		}
 		return nil
 	}
 }
 
 func roiPreviewFile(kind string) string {
-	return kind + "_roi_preview.png"
+	return strings.ReplaceAll(kind, ":", "-") + "_roi_preview.png"
 }
 
 func getROIPreview(preview *roiPreviewCache, kind string) ([]byte, bool) {
@@ -144,6 +172,13 @@ func captureDeathROIPreview(rect pickerRECT, roi ocrworker.PartyROIConfig) error
 
 func captureTargetROIPreview(rect pickerRECT, roi ocrworker.PartyROIConfig) error {
 	return captureROIPreview(rect, roi, "target")
+}
+
+func captureClickPopupScanROIPreview(rect pickerRECT, roi ocrworker.PartyROIConfig, kind string) error {
+	if clickPopupScanPreviewKind(kind) == "" {
+		return fmt.Errorf("unknown Click popup scan area %q", kind)
+	}
+	return captureROIPreview(rect, roi, kind)
 }
 
 func captureROIPreview(rect pickerRECT, roi ocrworker.PartyROIConfig, kind string) error {

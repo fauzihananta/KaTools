@@ -18,11 +18,17 @@ const statusOCRBarTolerance = 4.0
 const statusOCRBarOverestimateTolerance = 12.0
 
 type AutoPotRule struct {
-	Enabled   bool
-	Threshold float64
-	SlotVK    uintptr
-	lastUsed  time.Time
-	wasBelow  bool
+	Enabled              bool
+	Threshold            float64
+	SlotVK               uintptr
+	Click                bool
+	ClickAreaSet         bool
+	ClickX               int
+	ClickY               int
+	ClickReferenceWidth  int
+	ClickReferenceHeight int
+	lastUsed             time.Time
+	wasBelow             bool
 }
 
 type AutoPotEvent struct {
@@ -81,16 +87,40 @@ func NewAutoPotController(hwnd uintptr, cfg WebBotConfig) *AutoPotController {
 }
 
 func (p *AutoPotController) Update(cfg WebBotConfig) {
+	hpClick := cfg.ClickMethod()
+	hpClickArea := ClickSkillROI{}
+	tpClick := cfg.ClickMethod()
+	tpClickArea := ClickSkillROI{}
+	if hpClick {
+		areas := LoadClickSkillROIs()
+		hpClickArea = areas["HP"]
+		tpClickArea = areas["TP"]
+	}
+	hpClickAreaSet := hpClickArea.Selected
+	hpClickX := hpClickArea.X + hpClickArea.Width/2
+	hpClickY := hpClickArea.Y + hpClickArea.Height/2
+	tpClickAreaSet := tpClickArea.Selected
+	tpClickX := tpClickArea.X + tpClickArea.Width/2
+	tpClickY := tpClickArea.Y + tpClickArea.Height/2
+
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if p.hp.Enabled != cfg.AutoPotHPEnabled || p.hp.Threshold != cfg.AutoPotHPPercent || p.hp.SlotVK != cfg.AutoPotHPSlotVK {
+	if p.hp.Enabled != cfg.AutoPotHPEnabled || p.hp.Threshold != cfg.AutoPotHPPercent || p.hp.SlotVK != cfg.AutoPotHPSlotVK ||
+		p.hp.Click != hpClick || p.hp.ClickAreaSet != hpClickAreaSet || p.hp.ClickX != hpClickX || p.hp.ClickY != hpClickY ||
+		p.hp.ClickReferenceWidth != hpClickArea.ClientWidth || p.hp.ClickReferenceHeight != hpClickArea.ClientHeight {
 		p.hp.wasBelow = false
 	}
-	if p.tp.Enabled != cfg.AutoPotTPEnabled || p.tp.Threshold != cfg.AutoPotTPPercent || p.tp.SlotVK != cfg.AutoPotTPSlotVK {
+	if p.tp.Enabled != cfg.AutoPotTPEnabled || p.tp.Threshold != cfg.AutoPotTPPercent || p.tp.SlotVK != cfg.AutoPotTPSlotVK ||
+		p.tp.Click != tpClick || p.tp.ClickAreaSet != tpClickAreaSet || p.tp.ClickX != tpClickX || p.tp.ClickY != tpClickY ||
+		p.tp.ClickReferenceWidth != tpClickArea.ClientWidth || p.tp.ClickReferenceHeight != tpClickArea.ClientHeight {
 		p.tp.wasBelow = false
 	}
 	p.hp.Enabled, p.hp.Threshold, p.hp.SlotVK = cfg.AutoPotHPEnabled, cfg.AutoPotHPPercent, cfg.AutoPotHPSlotVK
+	p.hp.Click, p.hp.ClickAreaSet, p.hp.ClickX, p.hp.ClickY = hpClick, hpClickAreaSet, hpClickX, hpClickY
+	p.hp.ClickReferenceWidth, p.hp.ClickReferenceHeight = hpClickArea.ClientWidth, hpClickArea.ClientHeight
 	p.tp.Enabled, p.tp.Threshold, p.tp.SlotVK = cfg.AutoPotTPEnabled, cfg.AutoPotTPPercent, cfg.AutoPotTPSlotVK
+	p.tp.Click, p.tp.ClickAreaSet, p.tp.ClickX, p.tp.ClickY = tpClick, tpClickAreaSet, tpClickX, tpClickY
+	p.tp.ClickReferenceWidth, p.tp.ClickReferenceHeight = tpClickArea.ClientWidth, tpClickArea.ClientHeight
 }
 
 func (p *AutoPotController) IsAnyEnabled() bool {
@@ -413,7 +443,15 @@ func (p *AutoPotController) useIfLow(rule *AutoPotRule, current, maximum int) bo
 	if time.Since(rule.lastUsed) < autoPotCooldown {
 		return false
 	}
-	if pressKeyToWindow(p.hwnd, rule.SlotVK) {
+	sent := false
+	if rule.Click {
+		if rule.ClickAreaSet {
+			sent = clickWindowClientPointReference(p.hwnd, rule.ClickX, rule.ClickY, rule.ClickReferenceWidth, rule.ClickReferenceHeight) == nil
+		}
+	} else {
+		sent = pressKeyToWindow(p.hwnd, rule.SlotVK)
+	}
+	if sent {
 		rule.lastUsed = time.Now()
 		return true
 	}

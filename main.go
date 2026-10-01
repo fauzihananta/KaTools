@@ -186,12 +186,13 @@ type RuntimeManager struct {
 	memory  uintptr
 	reader  *FrameReader
 
-	bot         *BotController
-	autoAccept  *AutoAcceptController
-	autoPot     *AutoPotController
-	emergency   *EmergencySkillController
-	deathPause  *DeathPauseController
-	targetUntil *TargetUntilDeadController
+	bot           *BotController
+	autoAccept    *AutoAcceptController
+	autoPot       *AutoPotController
+	emergency     *EmergencySkillController
+	deathPause    *DeathPauseController
+	targetUntil   *TargetUntilDeadController
+	chatTextClick *ChatTextClickSettings
 
 	rect           RECT
 	scaleX         float64
@@ -222,6 +223,7 @@ func captureFPSForConfig(cfg WebBotConfig) int {
 		cfg.AutoPotHPEnabled ||
 		cfg.AutoPotTPEnabled ||
 		cfg.AutoPauseDeathEnabled ||
+		cfg.ChatTextClickEnabled ||
 		targetFilterEnabled {
 		return 10
 	}
@@ -290,13 +292,16 @@ func (m *RuntimeManager) Start(
 	emergency := NewEmergencySkillController(hwnd, cfg)
 	deathPause := NewDeathPauseController(cfg.AutoPauseDeathEnabled, cfg.AutoResurrectEnabled)
 	targetFilterEnabled := usesTargetNameFilter(cfg)
+	targetNames, targetFilterMode := targetNameFilterValues(cfg)
 	targetUntil := NewTargetUntilDeadController(
-		cfg.TargetUntilDeadEnabled,
+		cfg.TargetUntilDeadEnabled && !cfg.ClickMethod(),
 		targetFilterEnabled,
-		cfg.TargetUntilDeadEnabled && cfg.TargetUntilDeadSupport,
-		cfg.TargetUntilDeadCharacterName,
-		cfg.TargetNameFilterMode,
+		cfg.TargetUntilDeadEnabled && !cfg.ClickMethod() && cfg.TargetUntilDeadSupport,
+		targetNames,
+		targetFilterMode,
 	)
+	chatTextClick := &ChatTextClickSettings{}
+	chatTextClick.Update(cfg.ChatTextClickEnabled, cfg.ChatTextClickKeyword, cfg.ChatTextClickYOffset)
 	applyWebBotConfig(bot, autoAccept, autoPot, emergency, deathPause, targetUntil, cfg)
 
 	// ========================================================
@@ -525,6 +530,7 @@ func (m *RuntimeManager) Start(
 	m.emergency = emergency
 	m.deathPause = deathPause
 	m.targetUntil = targetUntil
+	m.chatTextClick = chatTextClick
 
 	m.rect = rect
 
@@ -606,6 +612,8 @@ func (m *RuntimeManager) Start(
 			reader,
 			windows.Handle(hwnd),
 			rect,
+			clientWidth,
+			clientHeight,
 			scaleX,
 			scaleY,
 			frameMapping.OriginX,
@@ -616,6 +624,7 @@ func (m *RuntimeManager) Start(
 			emergency,
 			deathPause,
 			targetUntil,
+			chatTextClick,
 			func(x, y int) { m.setCaptureOffset(x, y) },
 			func() { m.Stop() },
 			capturePollingInterval(captureFPS),
@@ -855,12 +864,68 @@ func (m *RuntimeManager) UpdateConfig(cfg WebBotConfig) error {
 	emergency := m.emergency
 	deathPause := m.deathPause
 	targetUntil := m.targetUntil
+	chatTextClick := m.chatTextClick
 	m.mu.RUnlock()
 
 	bot.Stop()
 	applyWebBotConfig(bot, autoAccept, autoPot, emergency, deathPause, targetUntil, cfg)
+	chatTextClick.Update(cfg.ChatTextClickEnabled, cfg.ChatTextClickKeyword, cfg.ChatTextClickYOffset)
 	bot.Start()
 
+	return nil
+}
+
+// UpdateClickSkills updates only the repeating Click-method slot scheduler.
+// It deliberately leaves WGC, OCR, target state, and the other runtime loops
+// untouched so a checkbox or interval change is immediate and non-disruptive.
+func (m *RuntimeManager) UpdateClickSkills(cfg WebBotConfig) error {
+	m.mu.RLock()
+	if !m.running || m.bot == nil {
+		m.mu.RUnlock()
+		return fmt.Errorf("KaTools is not running")
+	}
+	bot := m.bot
+	hwnd := m.hwnd
+	m.mu.RUnlock()
+
+	if cfg.HWND != "" {
+		selected, err := parseHWND(cfg.HWND)
+		if err != nil || selected != hwnd {
+			return fmt.Errorf("target window cannot be changed while running")
+		}
+	}
+	if !cfg.ClickMethod() {
+		return fmt.Errorf("Click skill live updates require Click Method")
+	}
+
+	areas := LoadClickSkillROIs()
+	skills := make([]SkillConfig, 0, len(cfg.Skills))
+	for _, skill := range cfg.Skills {
+		if !isClickSkillVK(skill.VK) {
+			continue
+		}
+		if skill.Enabled && skill.Delay <= 0 {
+			return fmt.Errorf("Skill %s interval must be greater than zero", skill.Name)
+		}
+		area := areas[skill.Name]
+		if skill.Enabled && !area.Selected {
+			return fmt.Errorf("Set the click area for Skill %s before enabling it", skill.Name)
+		}
+		skills = append(skills, SkillConfig{
+			Name:                 skill.Name,
+			VK:                   skill.VK,
+			Enabled:              skill.Enabled,
+			Delay:                secondsToDuration(skill.Delay),
+			Click:                true,
+			ClickAreaSet:         area.Selected,
+			ClickX:               area.X + area.Width/2,
+			ClickY:               area.Y + area.Height/2,
+			ClickReferenceWidth:  area.ClientWidth,
+			ClickReferenceHeight: area.ClientHeight,
+			TargetSearch:         cfg.ClickWhitelistMode && skill.TargetSearch,
+		})
+	}
+	bot.UpdateSkills(skills)
 	return nil
 }
 
@@ -1202,6 +1267,8 @@ func runPicker(
 	reader *FrameReader,
 	hwnd windows.Handle,
 	rect RECT,
+	clientWidth int,
+	clientHeight int,
 	scaleX float64,
 	scaleY float64,
 	frameOriginX int,
@@ -1212,6 +1279,7 @@ func runPicker(
 	emergency *EmergencySkillController,
 	deathPause *DeathPauseController,
 	targetUntil *TargetUntilDeadController,
+	chatTextClick *ChatTextClickSettings,
 	onCaptureOffset func(x, y int),
 	onRuntimeStop func(),
 	pollInterval time.Duration,
@@ -1261,10 +1329,27 @@ func runPicker(
 	resurrectionOCR := ocrworker.New(tesseractPath)
 	targetNameOCR := ocrworker.New(tesseractPath)
 	dcOCR := ocrworker.New(tesseractPath)
+	chatTextOCR := ocrworker.New(tesseractPath)
 	_ = hideROIConfigFiles()
 
+	partyScanROI := func() ocrworker.PartyROIConfig {
+		if bot != nil && bot.ClickMethodEnabled() {
+			if area, ok := LoadClickPopupScanAreaForClient("party", clientWidth, clientHeight); ok {
+				return area.ROI
+			}
+		}
+		return ocrworker.LoadPartyROI()
+	}
+	popupScanROI := func(kind string) ocrworker.PartyROIConfig {
+		if bot != nil && bot.ClickMethodEnabled() {
+			if area, ok := LoadClickPopupScanAreaForClient(kind, clientWidth, clientHeight); ok {
+				return area.ROI
+			}
+		}
+		return LoadDeathROI()
+	}
 	ocrROI := partyROIToFrame(
-		ocrworker.LoadPartyROI(),
+		partyScanROI(),
 		scaleX,
 		scaleY,
 		frameOriginX,
@@ -1272,6 +1357,9 @@ func runPicker(
 	)
 
 	popupROI := automaticPopupROI(reader.width, reader.height)
+	if bot != nil && bot.ClickMethodEnabled() {
+		popupROI = partyROIToFrame(partyScanROI(), scaleX, scaleY, frameOriginX, frameOriginY)
+	}
 	popupDetector := newPartyDetector(popupROI)
 	partyMembership := &PartyMembershipMonitor{}
 
@@ -1366,6 +1454,35 @@ func runPicker(
 	}
 	resurrectionOCRResultCh := make(chan resurrectionOCREvent, 1)
 	resurrectionOCRBusy := false
+	type chatTextEvent struct {
+		keyword                             string
+		yOffset                             int
+		match                               *ocrworker.TextMatch
+		recognizedText                      string
+		clientX, clientY                    int
+		referenceWidth, referenceHeight     int
+		scanX, scanY, scanWidth, scanHeight int
+		frameWidth, frameHeight             int
+		scaleX, scaleY                      float64
+		originX, originY                    int
+		offsetX, offsetY                    int
+		err                                 error
+	}
+	chatTextResultCh := make(chan chatTextEvent, 1)
+	chatTextOCRBusy := false
+	chatTextClickBusy := false
+	chatTextClickDoneCh := make(chan bool, 1)
+	var lastChatTextScanAt time.Time
+	var lastChatTextDiagnosticAt time.Time
+	var chatTextLatched bool
+	var chatTextCooldownUntil time.Time
+	logChatTextDiagnostic := func(format string, args ...any) {
+		if time.Since(lastChatTextDiagnosticAt) < 5*time.Second {
+			return
+		}
+		lastChatTextDiagnosticAt = time.Now()
+		appendOCRLog(format, args...)
+	}
 	var lastStatusBarAt time.Time
 	var lastStatusOCRAt time.Time
 	var lastStatusDiagnosticAt time.Time
@@ -1381,6 +1498,9 @@ func runPicker(
 	var lastStatusFrameNumber uint64
 	var lastPartyPanelCheck time.Time
 	var lastTargetBarAt time.Time
+	var targetROIOutsideScans int
+	var lastTargetROIInvalidDiagnosticAt time.Time
+	var lastCaptureRecalibrationAt time.Time
 	var lastDeathOCRAt time.Time
 	var lastDeathDialogCheckAt time.Time
 	var lastResurrectionOCRAt time.Time
@@ -1388,6 +1508,7 @@ func runPicker(
 	var lastDCOCRAt time.Time
 	var lastTargetNameSignature uint64
 	var targetNameSignatureSet bool
+	var clickWhitelistBarVisible bool
 	var pendingTargetNameSignature uint64
 	var pendingTargetNameSignatureScans int
 	var lastTargetNameOCRAt time.Time
@@ -1463,6 +1584,26 @@ func runPicker(
 		appendOCRLog("STATUS OCR | "+format, args...)
 	}
 
+	forceCaptureRecalibration := func(reason string) bool {
+		if !captureOffsetCalibrated || time.Since(lastCaptureRecalibrationAt) < 30*time.Second {
+			return false
+		}
+		lastCaptureRecalibrationAt = time.Now()
+		captureOffsetX = 0
+		captureOffsetY = 0
+		captureOffsetCalibrated = false
+		captureOffsetSearchIndex = 0
+		lastStatusOCRAt = time.Time{}
+		if onCaptureOffset != nil {
+			onCaptureOffset(0, 0)
+		}
+		if bot.IsClickWhitelistMode() {
+			bot.SetTargetActionReady(false)
+		}
+		appendOCRLog("WGC RECALIBRATION | %s | restarting shared ROI offset search", reason)
+		return true
+	}
+
 	// High-priority HP/TP path. Keep it outside the Party detector throttle so
 	// potion and emergency actions never wait for popup analysis.
 	scanStatusBar := func() {
@@ -1514,6 +1655,8 @@ func runPicker(
 			// can still establish the shared WGC offset.
 			if !captureOffsetCalibrated {
 				captureOffsetSearchIndex++
+			} else if forceCaptureRecalibration("calibrated Status ROI was outside WGC frame") {
+				appendOCRLog("STATUS OCR | calibrated ROI was clipped; shared offset reset to 0,0")
 			}
 			logStatusDiagnostic(
 				"ROI outside WGC frame | ROI=%d,%d %dx%d | OffsetX=%d OffsetY=%d | Frame=%dx%d | Scale=%.4f,%.4f",
@@ -1629,13 +1772,16 @@ func runPicker(
 			// ------------------------------------------------
 
 			roi := partyROIToFrame(
-				ocrworker.LoadPartyROI(),
+				partyScanROI(),
 				scaleX,
 				scaleY,
 				frameOriginX,
 				frameOriginY,
 			)
 			roi = applyCaptureOffset(roi)
+			if !roi.Selected || roi.Width <= 0 || roi.Height <= 0 {
+				return
+			}
 
 			img, ok :=
 				reader.ToImageRect(
@@ -1804,6 +1950,73 @@ func runPicker(
 
 		default:
 		}
+		select {
+		case success := <-chatTextClickDoneCh:
+			chatTextClickBusy = false
+			if success {
+				chatTextCooldownUntil = time.Now().Add(3 * time.Second)
+			} else {
+				chatTextLatched = false
+			}
+		case event := <-chatTextResultCh:
+			chatTextOCRBusy = false
+			if event.err != nil {
+				appendOCRLog("CHAT TEXT OCR | failed | %v", event.err)
+				break
+			}
+			if event.match == nil {
+				// A missing phrase is the normal result for most polling cycles.
+				// Keep it out of the persistent OCR log; positive matches and OCR/
+				// capture failures are still logged where they need investigation.
+				chatTextLatched = false
+				break
+			}
+			enabled, keyword, yOffset := chatTextClick.Snapshot()
+			if !enabled || !bot.ClickMethodEnabled() || strings.TrimSpace(keyword) == "" {
+				chatTextLatched = false
+				break
+			}
+			if event.keyword != keyword || event.yOffset != yOffset {
+				chatTextLatched = false
+				break
+			}
+			if !chatTextLatched && !chatTextClickBusy && time.Now().After(chatTextCooldownUntil) {
+				chatTextLatched = true
+				partyArea, partySet := LoadClickSkillROIs()["ChatParty"]
+				if !partySet || !partyArea.Selected {
+					appendOCRLog("CHAT TEXT CLICK FAILED | ChatParty click area is not set")
+					chatTextLatched = false
+					break
+				}
+				chatTextClickBusy = true
+				go func(event chatTextEvent, keyword string, partyArea ClickSkillROI) {
+					if err := clickWindowClientPointReference(uintptr(hwnd), partyArea.X+partyArea.Width/2, partyArea.Y+partyArea.Height/2, partyArea.ClientWidth, partyArea.ClientHeight); err != nil {
+						appendOCRLog("CHAT PARTY CLICK FAILED | Keyword=%q | %v", keyword, err)
+						select {
+						case chatTextClickDoneCh <- false:
+						case <-stopCh:
+						}
+						return
+					}
+					time.Sleep(150 * time.Millisecond)
+					secondClickErr := clickWindowClientPointReference(uintptr(hwnd), event.clientX, event.clientY, event.referenceWidth, event.referenceHeight)
+					if secondClickErr != nil {
+						appendOCRLog("CHAT CHARACTER CLICK FAILED | Keyword=%q | Point=%d,%d | %v", keyword, event.clientX, event.clientY, secondClickErr)
+					} else {
+						anchorText := "bubble"
+						if event.match.FollowingLine != nil {
+							anchorText = event.match.FollowingLine.Text
+						}
+						appendOCRLog("CHAT TEXT FLOW | Keyword=%q | Match=%q | Anchor=%q | PartyPoint=%d,%d | CharacterPoint=%d,%d | YOffset=%d | Confidence=%.1f", keyword, event.match.Text, anchorText, partyArea.X+partyArea.Width/2, partyArea.Y+partyArea.Height/2, event.clientX, event.clientY, event.yOffset, event.match.Confidence)
+					}
+					select {
+					case chatTextClickDoneCh <- (secondClickErr == nil):
+					case <-stopCh:
+					}
+				}(event, keyword, partyArea)
+			}
+		default:
+		}
 
 		// Status OCR runs independently from the party popup OCR. The status ROI
 		// contains the red HP and blue TP lines in that order.
@@ -1955,7 +2168,9 @@ func runPicker(
 				} else {
 					targetIsOwnCharacter = true
 					bot.SetTargetActionReady(false)
-					if targetUntil.ForceRetarget() && bot.CastTarget() {
+					if bot.IsClickWhitelistMode() {
+						appendOCRLog("TARGET VALIDATION | Not whitelisted | Text=%q | Target? slots resumed", oCRTextForLog(readableText))
+					} else if targetUntil.ForceRetarget() && bot.CastTarget() {
 						appendOCRLog("TARGET VALIDATION | Not whitelisted | Text=%q | Target sent", oCRTextForLog(readableText))
 					}
 				}
@@ -2024,13 +2239,23 @@ func runPicker(
 			}
 			texts := append([]string{event.text}, event.candidates...)
 			if dcNotification.Observe(texts) {
-				// Stop the scheduler before sending ENTER: after this point no skill,
+				// Stop the scheduler before acknowledging the dialog: after this point no skill,
 				// target, potion, or other bot input can race the closing game window.
 				bot.Stop()
-				sent := pressEnterToWindow(uintptr(hwnd))
+				sent := false
+				method := "Enter"
+				var inputErr error
+				if bot.ClickMethodEnabled() {
+					method = "click"
+					sent, inputErr = clickConfiguredAction(uintptr(hwnd), "DCOk")
+				} else {
+					sent = pressEnterToWindow(uintptr(hwnd))
+				}
 				appendOCRLog(
-					"DC DETECTED | Connection failed confirmed | Enter sent=%t | Stopping KaTools runtime | Text=%q",
+					"DC DETECTED | Connection failed confirmed | Input=%s sent=%t error=%v | Stopping KaTools runtime | Text=%q",
+					method,
 					sent,
+					inputErr,
 					oCRTextForLog(event.text),
 				)
 				if onRuntimeStop != nil {
@@ -2070,10 +2295,19 @@ func runPicker(
 			if event.err == nil && deathPause != nil && deathPause.ShouldScanResurrection() &&
 				isResurrectionPrompt(event.text) && event.foreground &&
 				deathPause.ObserveResurrectionPrompt(true) {
-				if pressEnterToWindow(uintptr(hwnd)) && deathPause.MarkResurrectionAccepted() {
-					appendOCRLog("AUTO RESU | Resurrection prompt verified | Enter sent | Waiting for HP")
+				sent := false
+				method := "Enter"
+				var inputErr error
+				if bot.ClickMethodEnabled() {
+					method = "click"
+					sent, inputErr = clickConfiguredAction(uintptr(hwnd), "AutoResu")
 				} else {
-					appendOCRLog("AUTO RESU | Resurrection prompt verified | Enter failed")
+					sent = pressEnterToWindow(uintptr(hwnd))
+				}
+				if sent && deathPause.MarkResurrectionAccepted() {
+					appendOCRLog("AUTO RESU | Resurrection prompt verified | Input=%s sent | Waiting for HP", method)
+				} else {
+					appendOCRLog("AUTO RESU | Resurrection prompt verified | Input=%s failed | Error=%v", method, inputErr)
 				}
 			} else if deathPause != nil && deathPause.ShouldScanResurrection() {
 				visible := event.err == nil && isResurrectionPrompt(event.text) && event.foreground
@@ -2166,10 +2400,15 @@ func runPicker(
 							partyAcceptDelay,
 						)
 
-						sent :=
-							pressEnterToWindow(
-								uintptr(hwnd),
-							)
+						sent := false
+						method := "Enter"
+						var inputErr error
+						if bot.ClickMethodEnabled() {
+							method = "click"
+							sent, inputErr = clickConfiguredAction(uintptr(hwnd), "AutoAccept")
+						} else {
+							sent = pressEnterToWindow(uintptr(hwnd))
+						}
 
 						if sent {
 
@@ -2183,7 +2422,8 @@ func runPicker(
 							)
 
 							appendOCRLog(
-								"AUTO ACCEPT | ENTER SENT | HWND=0x%X",
+								"AUTO ACCEPT | INPUT=%s SENT | HWND=0x%X",
+								method,
 								uintptr(hwnd),
 							)
 
@@ -2195,7 +2435,9 @@ func runPicker(
 							)
 
 							appendOCRLog(
-								"AUTO ACCEPT | ENTER FAILED | HWND=0x%X",
+								"AUTO ACCEPT | INPUT=%s FAILED | Error=%v | HWND=0x%X",
+								method,
+								inputErr,
 								uintptr(hwnd),
 							)
 						}
@@ -2460,6 +2702,46 @@ func runPicker(
 
 		lastDetectorRun =
 			time.Now()
+		chatEnabled, chatKeyword, chatYOffset := chatTextClick.Snapshot()
+		if chatEnabled && bot.ClickMethodEnabled() && strings.TrimSpace(chatKeyword) != "" && !chatTextOCRBusy && time.Since(lastChatTextScanAt) >= 900*time.Millisecond {
+			picked := LoadChatTextROI()
+			if picked.ROI.Selected {
+				roi := partyROIToFrame(picked.ROI, scaleX, scaleY, frameOriginX, frameOriginY)
+				scanX, scanY := roi.X+captureOffsetX, roi.Y+captureOffsetY
+				img, ok := reader.ToImageRect(scanX, scanY, roi.Width, roi.Height)
+				lastChatTextScanAt = time.Now()
+				if ok {
+					chatTextOCRBusy = true
+					go func(img image.Image, keyword string, yOffset int, roi ocrworker.PartyROIConfig, offsetX, offsetY, refW, refH, scanX, scanY, frameWidth, frameHeight, originX, originY int, scaleX, scaleY float64) {
+						match, recognizedText, err := chatTextOCR.FindTextBoxDetailed(img, keyword)
+						event := chatTextEvent{
+							keyword: keyword, yOffset: yOffset, match: match, recognizedText: recognizedText, err: err,
+							referenceWidth: refW, referenceHeight: refH,
+							scanX: scanX, scanY: scanY, scanWidth: roi.Width, scanHeight: roi.Height,
+							frameWidth: frameWidth, frameHeight: frameHeight, scaleX: scaleX, scaleY: scaleY,
+							originX: originX, originY: originY, offsetX: offsetX, offsetY: offsetY,
+						}
+						if match != nil {
+							anchorX := match.X + match.Width/2
+							if match.FollowingLine != nil {
+								anchorX = match.FollowingLine.X + match.FollowingLine.Width/2
+							}
+							event.clientX = roi.X + int(float64(anchorX)/scaleX) - int(float64(offsetX)/scaleX)
+							event.clientY = roi.Y + int(float64(match.Y+match.Height/2)/scaleY) - int(float64(offsetY)/scaleY) + yOffset
+						}
+						select {
+						case chatTextResultCh <- event:
+						case <-stopCh:
+						}
+					}(img, chatKeyword, chatYOffset, picked.ROI, captureOffsetX, captureOffsetY, picked.ClientWidth, picked.ClientHeight,
+						scanX, scanY, reader.width, reader.height, frameOriginX, frameOriginY, scaleX, scaleY)
+				} else {
+					logChatTextDiagnostic("CHAT TEXT SCAN | capture failed | ROI=%d,%d %dx%d | Offset=%d,%d", roi.X, roi.Y, roi.Width, roi.Height, captureOffsetX, captureOffsetY)
+				}
+			} else {
+				logChatTextDiagnostic("CHAT TEXT SCAN | skipped | chat scan area is not set")
+			}
+		}
 
 		partyScannerEnabled := autoAccept != nil && autoAccept.IsEnabled()
 		if partyScannerEnabled && time.Since(lastPartyPanelCheck) >= partyPanelCheckInterval {
@@ -2479,7 +2761,16 @@ func runPicker(
 			// VISUAL DETECTOR
 			// ====================================================
 
-			state := popupDetector.update(reader, popupROI)
+			if bot != nil && bot.ClickMethodEnabled() {
+				popupROI = partyROIToFrame(partyScanROI(), scaleX, scaleY, frameOriginX, frameOriginY)
+				popupROI = applyCaptureOffset(popupROI)
+			} else {
+				popupROI = automaticPopupROI(reader.width, reader.height)
+			}
+			state := lastPopupState
+			if bot == nil || !bot.ClickMethodEnabled() || partyScanROI().Selected {
+				state = popupDetector.update(reader, popupROI)
+			}
 
 			// ====================================================
 			// STATE CHANGE
@@ -2530,7 +2821,20 @@ func runPicker(
 		if !dcOCRBusy && time.Since(lastDCDialogCheckAt) >= dcDialogCheckInterval {
 			lastDCDialogCheckAt = time.Now()
 			dcROI := dcNotificationROI(reader.width, reader.height)
-			img, ok := reader.ToImageRect(dcROI.Min.X, dcROI.Min.Y, dcROI.Dx(), dcROI.Dy())
+			dcScanAreaSelected := true
+			if bot != nil && bot.ClickMethodEnabled() {
+				dcScanAreaSelected = false
+				if area, ok := LoadClickPopupScanAreaForClient("dc", clientWidth, clientHeight); ok && area.ROI.Selected {
+					mapped := applyCaptureOffset(partyROIToFrame(area.ROI, scaleX, scaleY, frameOriginX, frameOriginY))
+					dcROI = image.Rect(mapped.X, mapped.Y, mapped.X+mapped.Width, mapped.Y+mapped.Height)
+					dcScanAreaSelected = true
+				}
+			}
+			var img image.Image
+			ok := false
+			if dcScanAreaSelected {
+				img, ok = reader.ToImageRect(dcROI.Min.X, dcROI.Min.Y, dcROI.Dx(), dcROI.Dy())
+			}
 			if ok && dcDialogLooksPresent(img) && time.Since(lastDCOCRAt) >= dcOCRMinInterval {
 				dcOCRBusy = true
 				lastDCOCRAt = time.Now()
@@ -2556,7 +2860,7 @@ func runPicker(
 		if deathPause != nil && deathPause.IsTriggered() &&
 			time.Since(lastDeathDialogCheckAt) >= deathDialogCheckInterval {
 			lastDeathDialogCheckAt = time.Now()
-			deathROI := partyROIToFrame(LoadDeathROI(), scaleX, scaleY, frameOriginX, frameOriginY)
+			deathROI := partyROIToFrame(popupScanROI("death"), scaleX, scaleY, frameOriginX, frameOriginY)
 			deathROI = applyCaptureOffset(deathROI)
 			if deathROI.Selected {
 				img, ok := reader.ToImageRect(
@@ -2579,7 +2883,7 @@ func runPicker(
 		if deathPause != nil && deathPause.IsEnabled() && !deathPause.IsTriggered() &&
 			!deathOCRBusy && time.Since(lastDeathDialogCheckAt) >= deathDialogCheckInterval {
 			lastDeathDialogCheckAt = time.Now()
-			deathROI := partyROIToFrame(LoadDeathROI(), scaleX, scaleY, frameOriginX, frameOriginY)
+			deathROI := partyROIToFrame(popupScanROI("death"), scaleX, scaleY, frameOriginX, frameOriginY)
 			deathROI = applyCaptureOffset(deathROI)
 			if deathROI.Selected {
 				img, ok := reader.ToImageRect(
@@ -2597,7 +2901,7 @@ func runPicker(
 						lastDeathOCRAt = time.Now()
 						dialogMask := deathDialogMaskFromImage(img)
 						go func(img image.Image, dialogMask deathDialogMask) {
-							result, err := deathOCR.RunImage(img)
+							result, err := deathOCR.RunPartyImageVariants(img, nil)
 							event := deathOCREvent{err: err, dialogMask: dialogMask}
 							if result != nil {
 								event.text = result.Text
@@ -2617,7 +2921,7 @@ func runPicker(
 		// ever sent from generic death detection or a plain OK button.
 		if deathPause != nil && deathPause.ShouldScanResurrection() && !resurrectionOCRBusy &&
 			time.Since(lastResurrectionOCRAt) >= resurrectionOCRMinInterval {
-			resurrectionROI := partyROIToFrame(LoadDeathROI(), scaleX, scaleY, frameOriginX, frameOriginY)
+			resurrectionROI := partyROIToFrame(popupScanROI("death"), scaleX, scaleY, frameOriginX, frameOriginY)
 			resurrectionROI = applyCaptureOffset(resurrectionROI)
 			if resurrectionROI.Selected {
 				img, ok := reader.ToImageRect(
@@ -2647,7 +2951,7 @@ func runPicker(
 			}
 		}
 
-		targetMonitorNeeded := targetUntil != nil && (targetUntil.IsFilterEnabled() ||
+		targetMonitorNeeded := targetUntil != nil && (targetUntil.IsEnabled() || targetUntil.IsFilterEnabled() ||
 			(emergency != nil && emergency.NeedsTargetMonitor()))
 		targetMonitorInterval := targetBarInterval
 		if emergency != nil && emergency.NeedsTargetMonitor() {
@@ -2675,6 +2979,7 @@ func runPicker(
 					targetROI.Height,
 				)
 				if ok {
+					targetROIOutsideScans = 0
 					targetGeneration := bot.TargetGeneration()
 					if targetGeneration != lastTargetGeneration {
 						lastTargetGeneration = targetGeneration
@@ -2689,6 +2994,24 @@ func runPicker(
 					}
 					percent, barFound := detectFilledBarPercent(img, isHPBarPixel)
 					barVisible := barFound && percent > 1.5
+					if bot.IsClickWhitelistMode() && barVisible != clickWhitelistBarVisible {
+						// OCR may finish after the prior target disappeared. Invalidate
+						// its revision at the bar transition so it cannot release the
+						// normal skills for a target that is no longer on screen.
+						targetValidationRevision++
+						targetNameVerified = false
+						targetNameValidationLogged = false
+						targetAmbiguousName = ""
+						targetAmbiguousNameReads = 0
+						targetValidationStartedAt = time.Time{}
+						if barVisible {
+							targetValidationReadyAt = time.Now().Add(targetValidationSettleDelay)
+						} else {
+							targetValidationReadyAt = time.Time{}
+							bot.SetTargetActionReady(false)
+						}
+						clickWhitelistBarVisible = barVisible
+					}
 					// A nearly-empty live monster bar can be too narrow for the
 					// generic red-fill detector. Support Skills that are not marked
 					// With Target require the whole Target HUD to disappear as well,
@@ -2779,11 +3102,12 @@ func runPicker(
 						// needs the absent-panel case too, otherwise a failed WGC crop
 						// leaves its regular E scheduler gated forever.
 						fallbackEligible := barVisible || !targetUntil.IsEnabled()
-						if fallbackEligible && !targetNameVerified && !targetNameOCRBusy && !targetValidationStartedAt.IsZero() &&
+						if fallbackEligible && !bot.IsClickWhitelistMode() && !targetNameVerified && !targetNameOCRBusy && !targetValidationStartedAt.IsZero() &&
 							time.Since(targetValidationStartedAt) >= validationRetryDelay &&
 							targetUntil.ForceRetarget() {
-							bot.CastTarget()
-							appendOCRLog("TARGET VALIDATION | Name unavailable after %s | Target sent", validationRetryDelay)
+							if bot.CastTarget() {
+								appendOCRLog("TARGET VALIDATION | Name unavailable after %s | Target sent", validationRetryDelay)
+							}
 						}
 						if !barVisible {
 							targetIsOwnCharacter = false
@@ -2812,6 +3136,21 @@ func runPicker(
 							// has already been selected and leak an attack-causing skill.
 							bot.SetTargetPanelClear(false)
 							bot.CastTarget()
+						}
+					}
+				} else {
+					targetROIOutsideScans++
+					if time.Since(lastTargetROIInvalidDiagnosticAt) >= 30*time.Second {
+						lastTargetROIInvalidDiagnosticAt = time.Now()
+						appendOCRLog("TARGET MONITOR | ROI outside WGC frame | ROI=%d,%d %dx%d | Frame=%dx%d | OffsetX=%d OffsetY=%d | Consecutive=%d",
+							targetROI.X, targetROI.Y, targetROI.Width, targetROI.Height,
+							reader.width, reader.height, captureOffsetX, captureOffsetY, targetROIOutsideScans)
+					}
+					if targetROIOutsideScans >= 3 && forceCaptureRecalibration("Target ROI repeatedly outside WGC frame") {
+						targetROIOutsideScans = 0
+						appendOCRLog("TARGET MONITOR | shared offset recalibration requested after clipped Target ROI")
+						if bot.IsClickWhitelistMode() {
+							bot.SetTargetActionReady(false)
 						}
 					}
 				}

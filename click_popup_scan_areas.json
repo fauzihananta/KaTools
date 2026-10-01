@@ -1,0 +1,38 @@
+{
+  "dc": {
+    "roi": {
+      "x": 746,
+      "y": 633,
+      "width": 424,
+      "height": 160,
+      "selected": true
+    },
+    "clientWidth": 1920,
+    "clientHeight": 1440,
+    "custom": true
+  },
+  "death": {
+    "roi": {
+      "x": 754,
+      "y": 636,
+      "width": 416,
+      "height": 168,
+      "selected": true
+    },
+    "clientWidth": 1920,
+    "clientHeight": 1440,
+    "custom": true
+  },
+  "party": {
+    "roi": {
+      "x": 751,
+      "y": 633,
+      "width": 411,
+      "height": 161,
+      "selected": true
+    },
+    "clientWidth": 1920,
+    "clientHeight": 1440,
+    "custom": true
+  }
+}

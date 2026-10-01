@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"runtime"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -21,9 +22,6 @@ const (
 	wsExTopmost    = 0x00000008
 
 	wmPaint       = 0x000F
-	wmLButtonDown = 0x0201
-	wmLButtonUp   = 0x0202
-	wmMouseMove   = 0x0200
 	wmRButtonDown = 0x0204
 
 	vkEscape = 0x1B
@@ -140,6 +138,24 @@ func openDeathROIPicker(targetHWND windows.Handle) error {
 
 func openTargetROIPicker(targetHWND windows.Handle) error {
 	return openROIPicker(targetHWND, "target")
+}
+
+func openChatTextROIPicker(targetHWND windows.Handle) error {
+	return openROIPicker(targetHWND, "chat-text")
+}
+
+func openClickPopupScanROIPicker(targetHWND windows.Handle, kind string) error {
+	if !validClickPopupScanKind(kind) {
+		return fmt.Errorf("invalid click popup scan area %q", kind)
+	}
+	return openROIPicker(targetHWND, "click-popup:"+kind)
+}
+
+func openClickSkillROIPicker(targetHWND windows.Handle, slot string) error {
+	if !isClickSkillSlot(slot) {
+		return fmt.Errorf("invalid click skill slot %q", slot)
+	}
+	return openROIPicker(targetHWND, "click-skill:"+slot)
 }
 
 func openROIPicker(targetHWND windows.Handle, kind string) error {
@@ -594,6 +610,18 @@ func partyPickerWndProc(
 				state.currentY = y
 			}
 
+			if strings.HasPrefix(state.kind, "click-skill:") {
+				clickX := state.currentX
+				clickY := state.currentY
+				state.dragging = false
+				state.mu.Unlock()
+
+				releaseMouseCapture()
+				_, _ = savePickedClickSkillPoint(state, clickX, clickY)
+				destroyPickerWindow(hwnd)
+				return 0
+			}
+
 			state.dragging = false
 
 			x1 := state.startX
@@ -693,10 +721,9 @@ func capturePickerEvidence(state *partyPickerState) {
 	targetRect := state.targetRect
 	kind := state.kind
 	state.mu.Unlock()
-	if !capture {
+	if !capture || strings.HasPrefix(kind, "click-skill:") {
 		return
 	}
-
 	// Let DWM present the destroyed overlay before taking the desktop preview.
 	time.Sleep(80 * time.Millisecond)
 
@@ -707,6 +734,10 @@ func capturePickerEvidence(state *partyPickerState) {
 		err = captureTargetROIPreview(targetRect, selected)
 	} else if kind == "death" {
 		err = captureDeathROIPreview(targetRect, selected)
+	} else if kind == "chat-text" {
+		// The dashboard shows only the selected coordinates for this live scanner.
+	} else if strings.HasPrefix(kind, "click-popup:") {
+		err = captureClickPopupScanROIPreview(targetRect, selected, kind)
 	} else {
 		err = capturePartyROIPreview(targetRect, selected)
 	}
@@ -938,7 +969,19 @@ func savePickedROI(
 		height,
 	)
 	var err error
-	if state.kind == "status" {
+	if strings.HasPrefix(state.kind, "click-skill:") {
+		err = SavePickedClickSkillROI(strings.TrimPrefix(state.kind, "click-skill:"), ClickSkillROI{
+			X: roi.X, Y: roi.Y, Width: roi.Width, Height: roi.Height, Selected: true,
+			ClientWidth:  int(state.targetRect.Right - state.targetRect.Left),
+			ClientHeight: int(state.targetRect.Bottom - state.targetRect.Top),
+		})
+	} else if strings.HasPrefix(state.kind, "click-popup:") {
+		kind := strings.TrimPrefix(state.kind, "click-popup:")
+		err = SavePickedClickPopupScanArea(kind, roi,
+			int(state.targetRect.Right-state.targetRect.Left), int(state.targetRect.Bottom-state.targetRect.Top))
+	} else if state.kind == "chat-text" {
+		err = SavePickedChatTextROI(ChatTextROI{ROI: roi, ClientWidth: int(state.targetRect.Right - state.targetRect.Left), ClientHeight: int(state.targetRect.Bottom - state.targetRect.Top)})
+	} else if state.kind == "status" {
 		err = SavePickedStatusROI(roi)
 	} else if state.kind == "target" {
 		err = SavePickedTargetROI(roi)
@@ -973,6 +1016,31 @@ func savePickedROI(
 
 	fmt.Println("----------------------------------------")
 
+	return roi, true
+}
+
+func savePickedClickSkillPoint(state *partyPickerState, x, y int) (ClickSkillROI, bool) {
+	if state == nil || !strings.HasPrefix(state.kind, "click-skill:") {
+		return ClickSkillROI{}, false
+	}
+	width := int(state.targetRect.Right - state.targetRect.Left)
+	height := int(state.targetRect.Bottom - state.targetRect.Top)
+	if x < 0 || y < 0 || x >= width || y >= height {
+		fmt.Printf("[Click Skill Picker] Point is outside the selected window: %d,%d\n", x, y)
+		return ClickSkillROI{}, false
+	}
+
+	roi := ClickSkillROI{
+		X: x, Y: y, Width: 1, Height: 1, Selected: true,
+		ClientWidth: width, ClientHeight: height,
+	}
+	slot := strings.TrimPrefix(state.kind, "click-skill:")
+	if err := SavePickedClickSkillROI(slot, roi); err != nil {
+		fmt.Println("[Click Skill Picker] Save failed:", err)
+		return ClickSkillROI{}, false
+	}
+	_ = hideROIConfigFiles()
+	fmt.Printf("[Click Skill Picker] Skill %s point saved: X=%d Y=%d Client=%dx%d\n", slot, x, y, width, height)
 	return roi, true
 }
 

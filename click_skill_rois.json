@@ -1,0 +1,56 @@
+{
+  "AutoAccept": {
+    "x": 936,
+    "y": 768,
+    "width": 1,
+    "height": 1,
+    "selected": true,
+    "clientWidth": 1920,
+    "clientHeight": 1440
+  },
+  "AutoResu": {
+    "x": 936,
+    "y": 767,
+    "width": 1,
+    "height": 1,
+    "selected": true,
+    "clientWidth": 1920,
+    "clientHeight": 1440
+  },
+  "ChatParty": {
+    "x": 1597,
+    "y": 1347,
+    "width": 1,
+    "height": 1,
+    "selected": true,
+    "clientWidth": 1920,
+    "clientHeight": 1440
+  },
+  "DCOk": {
+    "x": 1063,
+    "y": 767,
+    "width": 1,
+    "height": 1,
+    "selected": true,
+    "clientWidth": 1920,
+    "clientHeight": 1440
+  },
+  "Emergency1": {
+    "x": 1494,
+    "y": 1202,
+    "width": 1,
+    "height": 1,
+    "selected": true,
+    "clientWidth": 1920,
+    "clientHeight": 1440
+  },
+  "HP": {
+    "x": 1253,
+    "y": 1248,
+    "width": 1,
+    "height": 1,
+    "selected": true,
+    "clientWidth": 1920,
+    "clientHeight": 1440
+  }
+}

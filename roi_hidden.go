@@ -9,13 +9,19 @@ import (
 
 var roiConfigFiles = []string{
 	"party_roi.json",
+	clickSkillROIFile,
+	clickPopupScanFile,
 	statusROIFile,
 	deathROIFile,
 	targetROIFile,
+	chatTextROIFile,
 	"party_roi_preview.png",
 	"status_roi_preview.png",
 	"death_roi_preview.png",
 	"target_roi_preview.png",
+	"click-popup-party_roi_preview.png",
+	"click-popup-death_roi_preview.png",
+	"click-popup-dc_roi_preview.png",
 }
 
 // hideROIConfigFiles keeps remembered screen coordinates out of the normal

@@ -24,6 +24,14 @@ func wgcSnapshotLabels(kind string) []string {
 		return []string{"Death Area", "Resu Area"}
 	case "target":
 		return []string{"Target Area"}
+	case "chat-text":
+		return []string{"Chat Text Scan Area"}
+	case "click-popup:party":
+		return []string{"Click Party Scan Area"}
+	case "click-popup:death":
+		return []string{"Click Death Scan Area"}
+	case "click-popup:dc":
+		return []string{"Click DC Scan Area"}
 	default:
 		return nil
 	}
@@ -40,7 +48,7 @@ func roiPreviewForSnapshot(kind string) ([]byte, bool) {
 	case "target":
 		return getTargetROIPreview()
 	default:
-		return nil, false
+		return getClickPopupScanROIPreview(kind)
 	}
 }
 
@@ -123,7 +131,7 @@ func saveSnapshotPNG(path string, img image.Image) error {
 // areas selected before Start; selections made while running are captured by
 // the picker itself.
 func (m *RuntimeManager) CaptureConfiguredWGCROISnapshots() {
-	for _, item := range []struct {
+	items := []struct {
 		kind string
 		roi  ocrworker.PartyROIConfig
 	}{
@@ -131,7 +139,39 @@ func (m *RuntimeManager) CaptureConfiguredWGCROISnapshots() {
 		{kind: "party", roi: ocrworker.LoadPartyROI()},
 		{kind: "death", roi: LoadDeathROI()},
 		{kind: "target", roi: LoadTargetROI()},
-	} {
+		{kind: "chat-text", roi: LoadChatTextROI().ROI},
+	}
+	m.mu.RLock()
+	clickMode := m.bot != nil && m.bot.ClickMethodEnabled()
+	hwnd := m.hwnd
+	m.mu.RUnlock()
+	if clickMode {
+		areas := LoadClickPopupScanAreas()
+		if rect, err := getPickerWindowRect(hwnd); err == nil {
+			clientWidth := int(rect.Right - rect.Left)
+			clientHeight := int(rect.Bottom - rect.Top)
+			for _, kind := range []string{"party", "death", "dc"} {
+				if area, ok := LoadClickPopupScanAreaForClient(kind, clientWidth, clientHeight); ok {
+					areas[kind] = area
+				}
+			}
+		}
+		items = append(items,
+			struct {
+				kind string
+				roi  ocrworker.PartyROIConfig
+			}{kind: "click-popup:party", roi: areas["party"].ROI},
+			struct {
+				kind string
+				roi  ocrworker.PartyROIConfig
+			}{kind: "click-popup:death", roi: areas["death"].ROI},
+			struct {
+				kind string
+				roi  ocrworker.PartyROIConfig
+			}{kind: "click-popup:dc", roi: areas["dc"].ROI},
+		)
+	}
+	for _, item := range items {
 		if !item.roi.Selected {
 			continue
 		}

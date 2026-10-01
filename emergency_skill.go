@@ -11,6 +11,7 @@ type EmergencySkillController struct {
 
 	hwnd              uintptr
 	slots             []WebEmergencySkillConfig
+	inputSender       func(WebEmergencySkillConfig) bool
 	selfTargeting     bool
 	assistPanicTarget bool
 	targetKnown       bool
@@ -37,13 +38,38 @@ func (c *EmergencySkillController) Update(cfg WebBotConfig) {
 	}
 	c.mu.Lock()
 	c.slots = slots
-	c.selfTargeting = cfg.TargetEnabled || cfg.TargetUntilDeadEnabled
-	c.assistPanicTarget = cfg.AssistPanicTarget
+	// Click targeting acquires monsters only through its configured Target?
+	// click slots. Emergency automation must not inject E behind that workflow.
+	c.selfTargeting = !cfg.ClickMethod() && (cfg.TargetEnabled || cfg.TargetUntilDeadEnabled)
+	c.assistPanicTarget = !cfg.ClickMethod() && cfg.AssistPanicTarget
 	// A live configuration change begins a new decision cycle. This prevents a
 	// previously sent panic E from suppressing the newly selected emergency
 	// setup while HP is still low.
 	c.panicTargetSent = false
 	c.mu.Unlock()
+}
+
+func (c *EmergencySkillController) SetInputSender(sender func(WebEmergencySkillConfig) bool) {
+	c.mu.Lock()
+	c.inputSender = sender
+	c.mu.Unlock()
+}
+
+func (c *EmergencySkillController) sendSkill(slot WebEmergencySkillConfig) {
+	c.mu.RLock()
+	sender := c.inputSender
+	c.mu.RUnlock()
+	if sender != nil {
+		sender(slot)
+		return
+	}
+	if slot.Click {
+		if slot.ClickAreaSet {
+			_ = clickWindowClientPoint(c.hwnd, slot.ClickX, slot.ClickY)
+		}
+		return
+	}
+	_ = pressKeyToWindow(c.hwnd, slot.VK)
 }
 
 func (c *EmergencySkillController) IsAnyEnabled() bool {
@@ -115,7 +141,7 @@ func (c *EmergencySkillController) ObserveHPPercent(percent float64, barFound bo
 			hasTargetSlots = true
 			continue
 		}
-		_ = pressKeyToWindow(c.hwnd, slot.VK)
+		c.sendSkill(slot)
 	}
 
 	if !hasTargetSlots {
@@ -126,7 +152,7 @@ func (c *EmergencySkillController) ObserveHPPercent(percent float64, barFound bo
 		// share this same low-HP cycle without an artificial delay.
 		for _, slot := range slots {
 			if slot.NeedsTarget {
-				_ = pressKeyToWindow(c.hwnd, slot.VK)
+				c.sendSkill(slot)
 			}
 		}
 		return false

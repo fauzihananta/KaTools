@@ -2,6 +2,7 @@ package ocrworker
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"image"
@@ -11,6 +12,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -68,6 +71,282 @@ type Result struct {
 	Duration     time.Duration
 	StatusHPText string
 	StatusTPText string
+}
+
+// TextMatch is a case-insensitive phrase match and its bounding box in the
+// source image coordinates.
+type TextMatch struct {
+	Text       string
+	X          int
+	Y          int
+	Width      int
+	Height     int
+	Confidence float64
+	// FollowingLine is the closest centered OCR line immediately below the
+	// matched line, when one is present. Chat bubbles commonly have the
+	// character name directly underneath them.
+	FollowingLine *TextMatch
+}
+
+type tesseractWord struct {
+	text                   string
+	x, y, w, h             int
+	confidence             float64
+	block, paragraph, line int
+}
+
+type tesseractLine struct {
+	words []tesseractWord
+	box   TextMatch
+}
+
+// FindTextBox runs Tesseract in sparse-text mode and returns the rectangle of
+// the requested phrase. TSV output provides word-level boxes, unlike plain
+// OCR text. Phrase matching is normalized and case-insensitive.
+func (o *OCR) FindTextBox(img image.Image, phrase string) (*TextMatch, error) {
+	match, _, err := o.FindTextBoxDetailed(img, phrase)
+	return match, err
+}
+
+// FindTextBoxDetailed enlarges small UI text before OCR and also returns the
+// words Tesseract recognized, so callers can diagnose misses without changing
+// whether a click is allowed.
+func (o *OCR) FindTextBoxDetailed(img image.Image, phrase string) (*TextMatch, string, error) {
+	phrase = normalizePhrase(phrase)
+	if phrase == "" {
+		return nil, "", fmt.Errorf("search phrase is empty")
+	}
+	img = upscaleNearest(img, 2)
+	var pngData bytes.Buffer
+	if err := png.Encode(&pngData, img); err != nil {
+		return nil, "", fmt.Errorf("encode OCR PNG: %w", err)
+	}
+	if strings.TrimSpace(o.TesseractPath) == "" {
+		return nil, "", fmt.Errorf("tesseract path is empty")
+	}
+	// The portable Tesseract bundle ships only traineddata, not the optional
+	// `tessdata/configs/tsv` file. Request TSV via a parameter so we never fall
+	// back to plain text while the caller tries to parse word-box columns.
+	args := []string{"stdin", "stdout", "--psm", "11", "-l", PartyOCRLang, "--dpi", "300", "-c", "tessedit_create_tsv=1"}
+	if o.TessdataPath != "" {
+		args = append(args, "--tessdata-dir", o.TessdataPath)
+	}
+	cmd := exec.Command(o.TesseractPath, args...)
+	cmd.Stdin = &pngData
+	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return nil, "", fmt.Errorf("tesseract TSV failed: %w: %s", err, strings.TrimSpace(string(output)))
+	}
+	tsv := string(output)
+	header := strings.SplitN(tsv, "\n", 2)[0]
+	header = strings.TrimSuffix(header, "\r")
+	if header != "level\tpage_num\tblock_num\tpar_num\tline_num\tword_num\tleft\ttop\twidth\theight\tconf\ttext" {
+		return nil, recognizedWordsFromTSV(tsv, 240), fmt.Errorf("tesseract did not return TSV word boxes; header=%q", header)
+	}
+	match := FindTextBoxInTSV(tsv, phrase)
+	if match != nil {
+		match.X /= 2
+		match.Y /= 2
+		match.Width = (match.Width + 1) / 2
+		match.Height = (match.Height + 1) / 2
+		if match.FollowingLine != nil {
+			match.FollowingLine.X /= 2
+			match.FollowingLine.Y /= 2
+			match.FollowingLine.Width = (match.FollowingLine.Width + 1) / 2
+			match.FollowingLine.Height = (match.FollowingLine.Height + 1) / 2
+		}
+	}
+	return match, recognizedWordsFromTSV(tsv, 240), nil
+}
+
+func upscaleNearest(img image.Image, scale int) image.Image {
+	bounds := img.Bounds()
+	if scale <= 1 || bounds.Empty() {
+		return img
+	}
+	resized := image.NewRGBA(image.Rect(0, 0, bounds.Dx()*scale, bounds.Dy()*scale))
+	for y := 0; y < resized.Bounds().Dy(); y++ {
+		for x := 0; x < resized.Bounds().Dx(); x++ {
+			resized.Set(x, y, img.At(bounds.Min.X+x/scale, bounds.Min.Y+y/scale))
+		}
+	}
+	return resized
+}
+
+func recognizedWordsFromTSV(tsv string, maxRunes int) string {
+	words := make([]string, 0)
+	for lineIndex, line := range strings.Split(tsv, "\n") {
+		if lineIndex == 0 || strings.TrimSpace(line) == "" {
+			continue
+		}
+		fields := strings.SplitN(line, "\t", 12)
+		if len(fields) == 12 && fields[0] == "5" && strings.TrimSpace(fields[11]) != "" {
+			words = append(words, fields[11])
+		}
+	}
+	text := strings.Join(words, " ")
+	runes := []rune(text)
+	if maxRunes > 0 && len(runes) > maxRunes {
+		return string(runes[:maxRunes]) + "…"
+	}
+	return text
+}
+
+func normalizePhrase(value string) string {
+	var normalized strings.Builder
+	space := true
+	for _, r := range strings.ToLower(value) {
+		if unicode.IsLetter(r) || unicode.IsNumber(r) {
+			normalized.WriteRune(r)
+			space = false
+		} else if !space {
+			normalized.WriteByte(' ')
+			space = true
+		}
+	}
+	return strings.TrimSpace(normalized.String())
+}
+
+// FindTextBoxInTSV locates a phrase among contiguous words on one OCR line.
+// Exported separately so matching and bounding-box behavior can be unit-tested.
+func FindTextBoxInTSV(tsv, phrase string) *TextMatch {
+	phrase = normalizePhrase(phrase)
+	if phrase == "" {
+		return nil
+	}
+	lines := make(map[[3]int][]tesseractWord)
+	for lineIndex, line := range strings.Split(tsv, "\n") {
+		if lineIndex == 0 || strings.TrimSpace(line) == "" {
+			continue
+		}
+		fields := strings.SplitN(line, "\t", 12)
+		if len(fields) < 12 || fields[0] != "5" {
+			continue
+		}
+		conf, err := strconv.ParseFloat(fields[10], 64)
+		if err != nil || conf < 0 {
+			continue
+		}
+		values := make([]int, 8)
+		valid := true
+		for i, fieldIndex := range []int{2, 3, 4, 5, 6, 7, 8, 9} {
+			values[i], err = strconv.Atoi(fields[fieldIndex])
+			if err != nil {
+				valid = false
+				break
+			}
+		}
+		if !valid || values[6] <= 0 || values[7] <= 0 {
+			continue
+		}
+		key := [3]int{values[0], values[1], values[2]}
+		lines[key] = append(lines[key], tesseractWord{text: fields[11], x: values[4], y: values[5], w: values[6], h: values[7], confidence: conf, block: values[0], paragraph: values[1], line: values[2]})
+	}
+	ordered := make([]tesseractLine, 0, len(lines))
+	for _, words := range lines {
+		sort.Slice(words, func(i, j int) bool { return words[i].x < words[j].x })
+		ordered = append(ordered, tesseractLine{words: words, box: textMatchForWords(words)})
+	}
+	sort.Slice(ordered, func(i, j int) bool {
+		if ordered[i].box.Y != ordered[j].box.Y {
+			return ordered[i].box.Y < ordered[j].box.Y
+		}
+		return ordered[i].box.X < ordered[j].box.X
+	})
+	needle := strings.Fields(phrase)
+	for lineIndex, line := range ordered {
+		words := line.words
+		for start := 0; start+len(needle) <= len(words); start++ {
+			parts := make([]string, len(needle))
+			x1, y1 := int(^uint(0)>>1), int(^uint(0)>>1)
+			x2, y2 := 0, 0
+			confidence := 0.0
+			for i := range needle {
+				word := words[start+i]
+				parts[i] = normalizePhrase(word.text)
+				if word.x < x1 {
+					x1 = word.x
+				}
+				if word.y < y1 {
+					y1 = word.y
+				}
+				if word.x+word.w > x2 {
+					x2 = word.x + word.w
+				}
+				if word.y+word.h > y2 {
+					y2 = word.y + word.h
+				}
+				confidence += word.confidence
+			}
+			if strings.Join(parts, " ") == phrase {
+				match := &TextMatch{Text: strings.Join(parts, " "), X: x1, Y: y1, Width: x2 - x1, Height: y2 - y1, Confidence: confidence / float64(len(needle))}
+				match.FollowingLine = closestCenteredLineBelow(ordered, lineIndex)
+				return match
+			}
+		}
+	}
+	return nil
+}
+
+func textMatchForWords(words []tesseractWord) TextMatch {
+	if len(words) == 0 {
+		return TextMatch{}
+	}
+	x1, y1 := words[0].x, words[0].y
+	x2, y2 := x1+words[0].w, y1+words[0].h
+	texts := make([]string, 0, len(words))
+	confidence := 0.0
+	for _, word := range words {
+		texts = append(texts, word.text)
+		if word.x < x1 {
+			x1 = word.x
+		}
+		if word.y < y1 {
+			y1 = word.y
+		}
+		if word.x+word.w > x2 {
+			x2 = word.x + word.w
+		}
+		if word.y+word.h > y2 {
+			y2 = word.y + word.h
+		}
+		confidence += word.confidence
+	}
+	return TextMatch{Text: strings.Join(texts, " "), X: x1, Y: y1, Width: x2 - x1, Height: y2 - y1, Confidence: confidence / float64(len(words))}
+}
+
+func closestCenteredLineBelow(lines []tesseractLine, matchIndex int) *TextMatch {
+	if matchIndex < 0 || matchIndex >= len(lines) {
+		return nil
+	}
+	base := lines[matchIndex].box
+	baseCenterX := base.X + base.Width/2
+	maxGap := base.Height*3 + 32
+	maxCenterDistance := base.Width/2 + 48
+	var best *TextMatch
+	bestGap := int(^uint(0) >> 1)
+	for i := matchIndex + 1; i < len(lines); i++ {
+		candidate := lines[i].box
+		gap := candidate.Y - (base.Y + base.Height)
+		if gap > maxGap {
+			break
+		}
+		if gap < 0 {
+			continue
+		}
+		centerDistance := candidate.X + candidate.Width/2 - baseCenterX
+		if centerDistance < 0 {
+			centerDistance = -centerDistance
+		}
+		if centerDistance > maxCenterDistance || gap >= bestGap {
+			continue
+		}
+		copy := candidate
+		best = &copy
+		bestGap = gap
+	}
+	return best
 }
 
 func New(tesseractPath string) *OCR {
@@ -603,6 +882,8 @@ func (o *OCR) RunTargetNameImageUntil(img image.Image, accept func(string) bool)
 	}
 
 	startTotal := time.Now()
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
 	variants := targetNameOCRVariants(img)
 	var fallback string
 	var candidates []string
@@ -619,13 +900,17 @@ func (o *OCR) RunTargetNameImageUntil(img image.Image, accept func(string) bool)
 			psms = append(psms, "11")
 		}
 		for _, psm := range psms {
-			text, err := o.runTesseractImageWithOptions(
+			text, err := o.runTesseractImageWithOptionsContext(
+				ctx,
 				variant,
 				i,
 				psm,
 				"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 ",
 			)
 			if err != nil {
+				if ctx.Err() != nil {
+					return nil, fmt.Errorf("target name OCR timed out after 8s: %w", ctx.Err())
+				}
 				continue
 			}
 			text = normalize(text)
@@ -1087,6 +1372,16 @@ func (o *OCR) runTesseractImageWithOptions(
 	psm string,
 	whitelist string,
 ) (string, error) {
+	return o.runTesseractImageWithOptionsContext(context.Background(), img, variant, psm, whitelist)
+}
+
+func (o *OCR) runTesseractImageWithOptionsContext(
+	ctx context.Context,
+	img image.Image,
+	variant int,
+	psm string,
+	whitelist string,
+) (string, error) {
 
 	if strings.TrimSpace(
 		o.TesseractPath,
@@ -1136,7 +1431,7 @@ func (o *OCR) runTesseractImageWithOptions(
 		args = append(args, "--tessdata-dir", o.TessdataPath)
 	}
 
-	cmd := exec.Command(o.TesseractPath, args...)
+	cmd := exec.CommandContext(ctx, o.TesseractPath, args...)
 	cmd.Stdin = &pngData
 	// Tesseract is a console executable. KaTools invokes it repeatedly for OCR;
 	// without this flag Windows briefly creates a terminal window for every

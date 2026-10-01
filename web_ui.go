@@ -185,6 +185,29 @@ h2 {
 	border-radius: 7px;
 }
 
+/* Explicitly preserve hidden state on elements whose display is set by CSS. */
+#attackActionCard[hidden],
+#pickActionCard[hidden],
+#normalFunctionSkillsSection[hidden],
+.click-only-skill[hidden],
+#autoPotClickHint[hidden],
+#autoPotHPSlot[hidden],
+#autoPotTPSlot[hidden],
+#keyboardActionsGrid[hidden],
+#targetPanelAreaSection[hidden],
+#clickTargetBehavior[hidden],
+#clickWhitelistNamesSettings[hidden],
+#partyROIInfo[hidden],
+#partyROIPreview[hidden],
+#deathROIInfo[hidden],
+#deathROIPreview[hidden],
+.click-target-toggle[hidden],
+.skill-delay[hidden],
+.click-area-controls[hidden],
+#pickDelay[hidden] {
+	display: none !important;
+}
+
 .action-card label {
 	font-size: 14px;
 }
@@ -222,6 +245,29 @@ input[type="text"].numeric-input {
 	border-radius: 7px;
 }
 
+.click-whitelist-mode .skill-card {
+	min-width: 0;
+	grid-template-columns: auto minmax(0, auto) auto 54px;
+}
+
+.click-whitelist-mode .skills-grid {
+	grid-template-columns: repeat(auto-fit, minmax(min(190px, 100%), 1fr));
+}
+
+.click-whitelist-mode .skill-delay {
+	width: 54px !important;
+	min-width: 54px;
+}
+
+.click-target-toggle {
+	display: inline-flex;
+	align-items: center;
+	gap: 3px;
+	white-space: nowrap;
+	font-size: 10px;
+	color: #fde68a;
+}
+
 .skill-name {
 	font-size: 14px;
 	font-weight: bold;
@@ -234,8 +280,65 @@ input[type="text"].numeric-input {
 
 .skill-delay {
 	width: 54px !important;
+	min-width: 0;
 	padding: 4px 6px !important;
 	font-size: 13px !important;
+}
+
+.click-area-controls {
+	grid-column: 1 / -1;
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 6px;
+	flex-wrap: wrap;
+}
+
+.click-area-status {
+	font-size: 11px;
+	color: #d1d5db;
+}
+
+.click-area-buttons {
+	display: flex;
+	gap: 5px;
+}
+
+.click-area-buttons button {
+	width: auto;
+	margin-top: 0;
+	padding: 5px 7px;
+	font-size: 11px;
+}
+
+.click-area-buttons button[onclick^="openClickSkillPicker"] {
+	background: #2563eb;
+	color: #fff;
+	border: 1px solid #60a5fa;
+}
+
+.click-area-buttons button.chat-scan-area-button {
+	background: #2563eb;
+	color: #fff;
+	border: 1px solid #60a5fa;
+}
+
+.click-area-buttons button.chat-scan-area-button:hover {
+	background: #1d4ed8;
+}
+
+.click-area-buttons button[onclick^="openClickSkillPicker"]:hover {
+	background: #1d4ed8;
+}
+
+.click-area-buttons button[onclick^="reset"] {
+	background: #dc2626;
+	color: #fff;
+	border: 1px solid #f87171;
+}
+
+.click-area-buttons button[onclick^="reset"]:hover {
+	background: #b91c1c;
 }
 
 .support-skills-grid {
@@ -260,6 +363,28 @@ input[type="text"].numeric-input {
 
 .support-with-target input {
 	margin-right: 4px;
+}
+
+.skill-area-card {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 8px;
+	background: #374151;
+	padding: 7px 8px;
+	border-radius: 7px;
+}
+
+.skill-area-button {
+	width: auto;
+	min-width: 86px;
+	padding: 5px 7px;
+	font-size: 11px;
+}
+
+.skill-area-status {
+	font-size: 11px;
+	color: #d1d5db;
 }
 
 button {
@@ -536,23 +661,33 @@ button:disabled:hover {
 	gap: 6px;
 }
 
+.roi-button-group .party-picker-button {
+	width: auto;
+}
+
 .party-action-card:has(.roi-button-group) {
 	grid-template-columns: auto 1fr auto;
 }
 
 .roi-reset-button {
 	min-width: 58px;
-	background: #4b5563;
+	background: #dc2626;
+	color: #fff;
+	border: 1px solid #f87171;
 }
 
 .roi-reset-button:hover {
-	background: #7f1d1d;
+	background: #b91c1c;
 }
 
 .party-roi-info {
 	margin-top: 7px;
 	color: #9ca3af;
 	font-size: 11px;
+}
+
+#skillLiveApplyStatus.error-text {
+	color: #fca5a5;
 }
 
 .party-roi-preview {
@@ -574,12 +709,39 @@ button:disabled:hover {
 	border-radius: 7px;
 }
 
+.click-global-action-area {
+	grid-template-columns: repeat(3, minmax(0, 1fr));
+	align-items: start;
+}
+
+.click-popup-scan-card {
+	min-width: 0;
+}
+
+.click-popup-scan-preview {
+	width: 100%;
+	max-height: 170px;
+	object-fit: contain;
+	background: #111827;
+}
+
 .roi-picker-title {
 	font-size: 14px;
 }
 
 .roi-picker-row .party-roi-info {
 	margin-top: 3px;
+}
+
+body.click-input-mode .party-action-card .roi-button-group {
+	display: none;
+}
+
+body.click-input-mode #partyROIInfo,
+body.click-input-mode #partyROIPreview,
+body.click-input-mode #deathROIInfo,
+body.click-input-mode #deathROIPreview {
+	display: none !important;
 }
 
 .pot-grid {
@@ -631,6 +793,22 @@ button:disabled:hover {
 	border: 1px solid #4b5563;
 	background: #111827;
 	color: white;
+}
+
+.click-input-mode .emergency-slot {
+	display: none;
+}
+
+.click-input-mode .emergency-card {
+	grid-template-columns: auto minmax(0, 1fr);
+}
+
+.emergency-target-label[hidden] {
+	display: none !important;
+}
+
+.emergency-panic-row[hidden] {
+	display: none !important;
 }
 
 .emergency-target-label,
@@ -751,12 +929,24 @@ button:disabled:hover {
 				Select the game window before pressing START.
 
 			</div>
-
 		</div>
 
 	</div>
 
-	<div class="section">
+	<div class="section" id="inputMethodSection">
+		<h2>Input Method</h2>
+		<div class="target-mode-options">
+			<label class="target-mode-option"><input type="radio" name="targetInputMethod" value="keyboard" checked disabled> Keyboard Method</label>
+			<label class="target-mode-option"><input type="radio" name="targetInputMethod" value="click" disabled> Click Method</label>
+		</div>
+		<div id="clickTargetBehavior" class="target-mode-options" hidden>
+			<label class="target-mode-option"><input type="radio" name="clickTargetBehavior" value="withoutName" checked> Without Name</label>
+			<label class="target-mode-option"><input type="radio" name="clickTargetBehavior" value="whitelist"> Whitelist Target</label>
+		</div>
+		<div class="hint">Keyboard Method keeps the current keyboard behavior. Click Method uses the existing click behavior for target, skills, and potions, and clicks the saved areas for Auto Accept, Auto Resu, and DC dialog OK. The picker returns to KaTools, and the cursor returns after each click.</div>
+	</div>
+
+	<div class="section" id="targetPanelAreaSection">
 
 		<h2>Target Panel Area</h2>
 
@@ -764,9 +954,14 @@ button:disabled:hover {
 			<div>
 				<div class="roi-picker-title">Target panel area (shared)</div>
 				<div id="targetROIInfo" class="party-roi-info">Select the target name and red HP bar first</div>
-				<div class="hint">Used by Target Until Dead and Emergency skills that need a target.</div>
+				<div class="hint">Used by Whitelist Target, Target Until Dead, and Emergency skills that need a target.</div>
 			</div>
 			<button type="button" class="party-picker-button" onclick="openTargetPicker()" title="Select the current target name and red HP bar">SET AREA</button>
+		</div>
+		<div id="clickWhitelistNamesSettings" class="target-name-card" hidden>
+			<label for="clickWhitelistTargetNames">Whitelist Target Names</label>
+			<input type="text" id="clickWhitelistTargetNames" placeholder="Example: Vasabhum;Zarku Rudhira" autocomplete="off">
+			<div class="hint">Only targets whose name matches this list will activate the unchecked skill slots. Separate names with a semicolon.</div>
 		</div>
 
 		<img id="targetROIPreview" class="party-roi-preview" alt="Selected target name and HP bar preview">
@@ -848,6 +1043,47 @@ button:disabled:hover {
 
 		</div>
 
+		<div class="roi-picker-row click-global-action-area" id="clickGlobalActionAreas" hidden>
+			<div><div class="roi-picker-title">Auto Accept Party click point</div><div class="click-area-controls" id="clickAreaControlsAutoAccept"><span class="click-area-status" id="clickAreaStatusAutoAccept">Area not set</span><div class="click-area-buttons"><button type="button" onclick="openClickSkillPicker('AutoAccept')">SET AREA</button><button type="button" id="clickAreaResetAutoAccept" onclick="resetClickSkillArea('AutoAccept')">RESET</button></div></div></div>
+			<div><div class="roi-picker-title">Auto Resu click point</div><div class="click-area-controls" id="clickAreaControlsAutoResu"><span class="click-area-status" id="clickAreaStatusAutoResu">Area not set</span><div class="click-area-buttons"><button type="button" onclick="openClickSkillPicker('AutoResu')">SET AREA</button><button type="button" id="clickAreaResetAutoResu" onclick="resetClickSkillArea('AutoResu')">RESET</button></div></div></div>
+			<div><div class="roi-picker-title">DC dialog OK click point</div><div class="click-area-controls" id="clickAreaControlsDCOk"><span class="click-area-status" id="clickAreaStatusDCOk">Area not set</span><div class="click-area-buttons"><button type="button" onclick="openClickSkillPicker('DCOk')">SET AREA</button><button type="button" id="clickAreaResetDCOk" onclick="resetClickSkillArea('DCOk')">RESET</button></div></div></div>
+		</div>
+
+		<div class="roi-picker-row click-global-action-area" id="clickPopupScanAreas" hidden>
+			<div class="click-popup-scan-card">
+				<div class="roi-picker-title">Party popup scan area</div>
+				<div class="click-area-controls"><span class="click-area-status" id="clickPopupScanStatusParty">Loading area...</span><div class="click-area-buttons"><button type="button" class="chat-scan-area-button" onclick="openClickPopupScanPicker('party')">SET SCAN AREA</button><button type="button" onclick="resetClickPopupScanArea('party')">RESET</button></div></div>
+				<img class="party-roi-preview click-popup-scan-preview" id="clickPopupScanPreviewParty" alt="Party popup scan area preview">
+			</div>
+			<div class="click-popup-scan-card">
+				<div class="roi-picker-title">Death / Resu popup scan area</div>
+				<div class="click-area-controls"><span class="click-area-status" id="clickPopupScanStatusDeath">Loading area...</span><div class="click-area-buttons"><button type="button" class="chat-scan-area-button" onclick="openClickPopupScanPicker('death')">SET SCAN AREA</button><button type="button" onclick="resetClickPopupScanArea('death')">RESET</button></div></div>
+				<img class="party-roi-preview click-popup-scan-preview" id="clickPopupScanPreviewDeath" alt="Death and resurrection popup scan area preview">
+			</div>
+			<div class="click-popup-scan-card">
+				<div class="roi-picker-title">DC popup scan area</div>
+				<div class="click-area-controls"><span class="click-area-status" id="clickPopupScanStatusDc">Loading area...</span><div class="click-area-buttons"><button type="button" class="chat-scan-area-button" onclick="openClickPopupScanPicker('dc')">SET SCAN AREA</button><button type="button" onclick="resetClickPopupScanArea('dc')">RESET</button></div></div>
+				<img class="party-roi-preview click-popup-scan-preview" id="clickPopupScanPreviewDc" alt="Disconnect popup scan area preview">
+			</div>
+		</div>
+
+		<div class="roi-picker-row click-global-action-area" id="chatTextClickSettings" hidden>
+			<div>
+				<div class="roi-picker-title"><label><input type="checkbox" id="chatTextClickEnabled"> Click chat keyword</label></div>
+				<div class="click-area-controls">
+					<label for="chatTextClickKeyword">Keyword</label>
+					<input type="text" id="chatTextClickKeyword" placeholder="Add Party Please" autocomplete="off">
+					<span class="click-area-status" id="chatTextROIInfo">Scan area not set</span>
+					<div class="click-area-buttons"><button type="button" class="chat-scan-area-button" onclick="openChatTextPicker()">SET SCAN AREA</button></div>
+					<div class="roi-picker-title">Party target click point</div>
+					<div class="click-area-controls" id="clickAreaControlsChatParty"><span class="click-area-status" id="clickAreaStatusChatParty">Area not set</span><div class="click-area-buttons"><button type="button" onclick="openClickSkillPicker('ChatParty')">SET PARTY POINT</button><button type="button" id="clickAreaResetChatParty" onclick="resetClickSkillArea('ChatParty')">RESET</button></div></div>
+					<label for="chatTextClickYOffset">Click below detected text (px)</label>
+					<input type="number" class="numeric-input" id="chatTextClickYOffset" min="0" max="200" step="1" value="45">
+				</div>
+				<div class="hint">When the phrase is found, KaTools clicks the saved Party point first, then clicks below the floating text to target that character.</div>
+			</div>
+		</div>
+
 		<div
 			id="partyROIInfo"
 			class="party-roi-info">
@@ -898,18 +1134,21 @@ button:disabled:hover {
 					<label for="autoPotHP">HP Pot</label>
 					<input type="text" inputmode="decimal" class="numeric-input" id="autoPotHPPercent" value="0" placeholder="%">
 					<select id="autoPotHPSlot"><option value="49">1</option><option value="50">2</option><option value="51">3</option><option value="52">4</option><option value="53">5</option><option value="54">6</option><option value="55">7</option><option value="56">8</option><option value="57">9</option><option value="48">0</option><option value="112">F1</option><option value="113">F2</option><option value="114">F3</option><option value="115">F4</option><option value="116">F5</option><option value="117">F6</option><option value="118">F7</option><option value="119">F8</option><option value="120">F9</option><option value="121">F10</option></select>
+					<div class="click-area-controls" id="clickAreaControlsHP" hidden><span class="click-area-status" id="clickAreaStatusHP">HP area not set</span><div class="click-area-buttons"><button type="button" onclick="openClickSkillPicker('HP')">SET AREA</button><button type="button" id="clickAreaResetHP" onclick="resetClickSkillArea('HP')">RESET</button></div></div>
 				</div>
 				<div class="pot-card">
 					<input type="checkbox" id="autoPotTP" disabled>
 					<label for="autoPotTP">TP Pot</label>
 					<input type="text" inputmode="decimal" class="numeric-input" id="autoPotTPPercent" value="0" placeholder="%">
 					<select id="autoPotTPSlot"><option value="49">1</option><option value="50">2</option><option value="51">3</option><option value="52">4</option><option value="53">5</option><option value="54">6</option><option value="55">7</option><option value="56">8</option><option value="57">9</option><option value="48">0</option><option value="112">F1</option><option value="113">F2</option><option value="114">F3</option><option value="115">F4</option><option value="116">F5</option><option value="117">F6</option><option value="118">F7</option><option value="119">F8</option><option value="120">F9</option><option value="121">F10</option></select>
+					<div class="click-area-controls" id="clickAreaControlsTP" hidden><span class="click-area-status" id="clickAreaStatusTP">TP area not set</span><div class="click-area-buttons"><button type="button" onclick="openClickSkillPicker('TP')">SET AREA</button><button type="button" id="clickAreaResetTP" onclick="resetClickSkillArea('TP')">RESET</button></div></div>
 				</div>
 			</div>
+			<div class="hint" id="autoPotClickHint" hidden>In Click mode, HP Pot and TP Pot each use their own saved click point. Set an area for each pot you enable.</div>
 
 		</div>
 
-		<div class="actions-grid">
+		<div class="actions-grid" id="keyboardActionsGrid">
 
 			<div class="target-mode-card">
 				<div class="target-mode-title">Target Mode</div>
@@ -961,7 +1200,7 @@ button:disabled:hover {
 				</div>
 			</div>
 
-			<div class="action-card">
+			<div class="action-card" id="attackActionCard">
 
 				<input
 					type="checkbox"
@@ -982,7 +1221,7 @@ button:disabled:hover {
 
 			</div>
 
-			<div class="action-card">
+			<div class="action-card" id="pickActionCard">
 
 				<input
 					type="checkbox"
@@ -1011,67 +1250,50 @@ button:disabled:hover {
 
 		<h2>Skills — Number</h2>
 
+		<div class="hint" id="skillInputHint">Check the skills to run and enter each interval in seconds. Click mode supports slots 1–0 and F1–F10.</div>
+		<div class="hint" id="skillLiveApplyStatus" role="status" aria-live="polite"></div>
 		<div class="skills-grid">
 
 			<div class="skill-card">
 				<input class="skill-check" type="checkbox" id="skill1">
 				<label class="skill-name">1</label>
 				<input class="skill-delay numeric-input" type="text" inputmode="decimal" id="delay1" value="0">
+				<div class="click-area-controls" id="clickAreaControls1" hidden><span class="click-area-status" id="clickAreaStatus1">Area not set</span><div class="click-area-buttons"><button type="button" onclick="openClickSkillPicker('1')">SET AREA</button><button type="button" id="clickAreaReset1" onclick="resetClickSkillArea('1')">RESET</button></div></div>
 			</div>
 
 			<div class="skill-card">
 				<input class="skill-check" type="checkbox" id="skill2">
 				<label class="skill-name">2</label>
 				<input class="skill-delay numeric-input" type="text" inputmode="decimal" id="delay2" value="0">
+				<div class="click-area-controls" id="clickAreaControls2" hidden><span class="click-area-status" id="clickAreaStatus2">Area not set</span><div class="click-area-buttons"><button type="button" onclick="openClickSkillPicker('2')">SET AREA</button><button type="button" id="clickAreaReset2" onclick="resetClickSkillArea('2')">RESET</button></div></div>
 			</div>
 
 			<div class="skill-card">
 				<input class="skill-check" type="checkbox" id="skill3">
 				<label class="skill-name">3</label>
 				<input class="skill-delay numeric-input" type="text" inputmode="decimal" id="delay3" value="0">
+				<div class="click-area-controls" id="clickAreaControls3" hidden><span class="click-area-status" id="clickAreaStatus3">Area not set</span><div class="click-area-buttons"><button type="button" onclick="openClickSkillPicker('3')">SET AREA</button><button type="button" id="clickAreaReset3" onclick="resetClickSkillArea('3')">RESET</button></div></div>
 			</div>
 
 			<div class="skill-card">
 				<input class="skill-check" type="checkbox" id="skill4">
 				<label class="skill-name">4</label>
 				<input class="skill-delay numeric-input" type="text" inputmode="decimal" id="delay4" value="0">
+				<div class="click-area-controls" id="clickAreaControls4" hidden><span class="click-area-status" id="clickAreaStatus4">Area not set</span><div class="click-area-buttons"><button type="button" onclick="openClickSkillPicker('4')">SET AREA</button><button type="button" id="clickAreaReset4" onclick="resetClickSkillArea('4')">RESET</button></div></div>
 			</div>
 
 			<div class="skill-card">
 				<input class="skill-check" type="checkbox" id="skill5">
 				<label class="skill-name">5</label>
 				<input class="skill-delay numeric-input" type="text" inputmode="decimal" id="delay5" value="0">
+				<div class="click-area-controls" id="clickAreaControls5" hidden><span class="click-area-status" id="clickAreaStatus5">Area not set</span><div class="click-area-buttons"><button type="button" onclick="openClickSkillPicker('5')">SET AREA</button><button type="button" id="clickAreaReset5" onclick="resetClickSkillArea('5')">RESET</button></div></div>
 			</div>
 
-			<div class="skill-card">
-				<input class="skill-check" type="checkbox" id="skill6">
-				<label class="skill-name">6</label>
-				<input class="skill-delay numeric-input" type="text" inputmode="decimal" id="delay6" value="0">
-			</div>
-
-			<div class="skill-card">
-				<input class="skill-check" type="checkbox" id="skill7">
-				<label class="skill-name">7</label>
-				<input class="skill-delay numeric-input" type="text" inputmode="decimal" id="delay7" value="0">
-			</div>
-
-			<div class="skill-card">
-				<input class="skill-check" type="checkbox" id="skill8">
-				<label class="skill-name">8</label>
-				<input class="skill-delay numeric-input" type="text" inputmode="decimal" id="delay8" value="0">
-			</div>
-
-			<div class="skill-card">
-				<input class="skill-check" type="checkbox" id="skill9">
-				<label class="skill-name">9</label>
-				<input class="skill-delay numeric-input" type="text" inputmode="decimal" id="delay9" value="0">
-			</div>
-
-			<div class="skill-card">
-				<input class="skill-check" type="checkbox" id="skill0">
-				<label class="skill-name">0</label>
-				<input class="skill-delay numeric-input" type="text" inputmode="decimal" id="delay0" value="0">
-			</div>
+			<div class="skill-card click-only-skill" hidden><input class="skill-check" type="checkbox" id="skill6"><label class="skill-name">6</label><input class="skill-delay numeric-input" type="text" inputmode="decimal" id="delay6" value="0"><div class="click-area-controls" id="clickAreaControls6" hidden><span class="click-area-status" id="clickAreaStatus6">Area not set</span><div class="click-area-buttons"><button type="button" onclick="openClickSkillPicker('6')">SET AREA</button><button type="button" id="clickAreaReset6" onclick="resetClickSkillArea('6')">RESET</button></div></div></div>
+			<div class="skill-card click-only-skill" hidden><input class="skill-check" type="checkbox" id="skill7"><label class="skill-name">7</label><input class="skill-delay numeric-input" type="text" inputmode="decimal" id="delay7" value="0"><div class="click-area-controls" id="clickAreaControls7" hidden><span class="click-area-status" id="clickAreaStatus7">Area not set</span><div class="click-area-buttons"><button type="button" onclick="openClickSkillPicker('7')">SET AREA</button><button type="button" id="clickAreaReset7" onclick="resetClickSkillArea('7')">RESET</button></div></div></div>
+			<div class="skill-card click-only-skill" hidden><input class="skill-check" type="checkbox" id="skill8"><label class="skill-name">8</label><input class="skill-delay numeric-input" type="text" inputmode="decimal" id="delay8" value="0"><div class="click-area-controls" id="clickAreaControls8" hidden><span class="click-area-status" id="clickAreaStatus8">Area not set</span><div class="click-area-buttons"><button type="button" onclick="openClickSkillPicker('8')">SET AREA</button><button type="button" id="clickAreaReset8" onclick="resetClickSkillArea('8')">RESET</button></div></div></div>
+			<div class="skill-card click-only-skill" hidden><input class="skill-check" type="checkbox" id="skill9"><label class="skill-name">9</label><input class="skill-delay numeric-input" type="text" inputmode="decimal" id="delay9" value="0"><div class="click-area-controls" id="clickAreaControls9" hidden><span class="click-area-status" id="clickAreaStatus9">Area not set</span><div class="click-area-buttons"><button type="button" onclick="openClickSkillPicker('9')">SET AREA</button><button type="button" id="clickAreaReset9" onclick="resetClickSkillArea('9')">RESET</button></div></div></div>
+			<div class="skill-card click-only-skill" hidden><input class="skill-check" type="checkbox" id="skill0"><label class="skill-name">0</label><input class="skill-delay numeric-input" type="text" inputmode="decimal" id="delay0" value="0"><div class="click-area-controls" id="clickAreaControls0" hidden><span class="click-area-status" id="clickAreaStatus0">Area not set</span><div class="click-area-buttons"><button type="button" onclick="openClickSkillPicker('0')">SET AREA</button><button type="button" id="clickAreaReset0" onclick="resetClickSkillArea('0')">RESET</button></div></div></div>
 
 		</div>
 
@@ -1087,60 +1309,70 @@ button:disabled:hover {
 				<input class="skill-check" type="checkbox" id="skillF1">
 				<label class="skill-name">F1</label>
 				<input class="skill-delay numeric-input" type="text" inputmode="decimal" id="delayF1" value="0">
+				<div class="click-area-controls" id="clickAreaControlsF1" hidden><span class="click-area-status" id="clickAreaStatusF1">Area not set</span><div class="click-area-buttons"><button type="button" onclick="openClickSkillPicker('F1')">SET AREA</button><button type="button" id="clickAreaResetF1" onclick="resetClickSkillArea('F1')">RESET</button></div></div>
 			</div>
 
 			<div class="skill-card">
 				<input class="skill-check" type="checkbox" id="skillF2">
 				<label class="skill-name">F2</label>
 				<input class="skill-delay numeric-input" type="text" inputmode="decimal" id="delayF2" value="0">
+				<div class="click-area-controls" id="clickAreaControlsF2" hidden><span class="click-area-status" id="clickAreaStatusF2">Area not set</span><div class="click-area-buttons"><button type="button" onclick="openClickSkillPicker('F2')">SET AREA</button><button type="button" id="clickAreaResetF2" onclick="resetClickSkillArea('F2')">RESET</button></div></div>
 			</div>
 
 			<div class="skill-card">
 				<input class="skill-check" type="checkbox" id="skillF3">
 				<label class="skill-name">F3</label>
 				<input class="skill-delay numeric-input" type="text" inputmode="decimal" id="delayF3" value="0">
+				<div class="click-area-controls" id="clickAreaControlsF3" hidden><span class="click-area-status" id="clickAreaStatusF3">Area not set</span><div class="click-area-buttons"><button type="button" onclick="openClickSkillPicker('F3')">SET AREA</button><button type="button" id="clickAreaResetF3" onclick="resetClickSkillArea('F3')">RESET</button></div></div>
 			</div>
 
 			<div class="skill-card">
 				<input class="skill-check" type="checkbox" id="skillF4">
 				<label class="skill-name">F4</label>
 				<input class="skill-delay numeric-input" type="text" inputmode="decimal" id="delayF4" value="0">
+				<div class="click-area-controls" id="clickAreaControlsF4" hidden><span class="click-area-status" id="clickAreaStatusF4">Area not set</span><div class="click-area-buttons"><button type="button" onclick="openClickSkillPicker('F4')">SET AREA</button><button type="button" id="clickAreaResetF4" onclick="resetClickSkillArea('F4')">RESET</button></div></div>
 			</div>
 
 			<div class="skill-card">
 				<input class="skill-check" type="checkbox" id="skillF5">
 				<label class="skill-name">F5</label>
 				<input class="skill-delay numeric-input" type="text" inputmode="decimal" id="delayF5" value="0">
+				<div class="click-area-controls" id="clickAreaControlsF5" hidden><span class="click-area-status" id="clickAreaStatusF5">Area not set</span><div class="click-area-buttons"><button type="button" onclick="openClickSkillPicker('F5')">SET AREA</button><button type="button" id="clickAreaResetF5" onclick="resetClickSkillArea('F5')">RESET</button></div></div>
 			</div>
 
 			<div class="skill-card">
 				<input class="skill-check" type="checkbox" id="skillF6">
 				<label class="skill-name">F6</label>
 				<input class="skill-delay numeric-input" type="text" inputmode="decimal" id="delayF6" value="0">
+				<div class="click-area-controls" id="clickAreaControlsF6" hidden><span class="click-area-status" id="clickAreaStatusF6">Area not set</span><div class="click-area-buttons"><button type="button" onclick="openClickSkillPicker('F6')">SET AREA</button><button type="button" id="clickAreaResetF6" onclick="resetClickSkillArea('F6')">RESET</button></div></div>
 			</div>
 
 			<div class="skill-card">
 				<input class="skill-check" type="checkbox" id="skillF7">
 				<label class="skill-name">F7</label>
 				<input class="skill-delay numeric-input" type="text" inputmode="decimal" id="delayF7" value="0">
+				<div class="click-area-controls" id="clickAreaControlsF7" hidden><span class="click-area-status" id="clickAreaStatusF7">Area not set</span><div class="click-area-buttons"><button type="button" onclick="openClickSkillPicker('F7')">SET AREA</button><button type="button" id="clickAreaResetF7" onclick="resetClickSkillArea('F7')">RESET</button></div></div>
 			</div>
 
 			<div class="skill-card">
 				<input class="skill-check" type="checkbox" id="skillF8">
 				<label class="skill-name">F8</label>
 				<input class="skill-delay numeric-input" type="text" inputmode="decimal" id="delayF8" value="0">
+				<div class="click-area-controls" id="clickAreaControlsF8" hidden><span class="click-area-status" id="clickAreaStatusF8">Area not set</span><div class="click-area-buttons"><button type="button" onclick="openClickSkillPicker('F8')">SET AREA</button><button type="button" id="clickAreaResetF8" onclick="resetClickSkillArea('F8')">RESET</button></div></div>
 			</div>
 
 			<div class="skill-card">
 				<input class="skill-check" type="checkbox" id="skillF9">
 				<label class="skill-name">F9</label>
 				<input class="skill-delay numeric-input" type="text" inputmode="decimal" id="delayF9" value="0">
+				<div class="click-area-controls" id="clickAreaControlsF9" hidden><span class="click-area-status" id="clickAreaStatusF9">Area not set</span><div class="click-area-buttons"><button type="button" onclick="openClickSkillPicker('F9')">SET AREA</button><button type="button" id="clickAreaResetF9" onclick="resetClickSkillArea('F9')">RESET</button></div></div>
 			</div>
 
 			<div class="skill-card">
 				<input class="skill-check" type="checkbox" id="skillF10">
 				<label class="skill-name">F10</label>
 				<input class="skill-delay numeric-input" type="text" inputmode="decimal" id="delayF10" value="0">
+				<div class="click-area-controls" id="clickAreaControlsF10" hidden><span class="click-area-status" id="clickAreaStatusF10">Area not set</span><div class="click-area-buttons"><button type="button" onclick="openClickSkillPicker('F10')">SET AREA</button><button type="button" id="clickAreaResetF10" onclick="resetClickSkillArea('F10')">RESET</button></div></div>
 			</div>
 
 		</div>
@@ -1222,7 +1454,8 @@ function installROIControls() {
 		{ kind: "party", action: "openPartyPicker()" },
 		{ kind: "death", action: "openDeathPicker()" },
 		{ kind: "status", action: "openStatusPicker()" },
-		{ kind: "target", action: "openTargetPicker()" }
+		{ kind: "target", action: "openTargetPicker()" },
+		{ kind: "chat-text", action: "openChatTextPicker()" }
 	];
 	for (const control of controls) {
 		const setButton = document.querySelector('button[onclick="' + control.action + '"]');
@@ -1244,7 +1477,7 @@ function installROIControls() {
 }
 
 async function resetROI(kind) {
-	const labels = { party: "Party OCR", death: "death dialog", status: "HP / TP status", target: "target panel" };
+	const labels = { party: "Party OCR", death: "death dialog", status: "HP / TP status", target: "target panel", "chat-text": "chat text scan" };
 	if (!confirm("Reset " + labels[kind] + " area? The related feature will be disabled.")) return;
 	try {
 		const response = await fetch("/api/" + kind + "-roi/reset", { method: "POST" });
@@ -1258,8 +1491,9 @@ async function resetROI(kind) {
 			preview.removeAttribute("src");
 			preview.style.display = "none";
 		}
-		const loaders = { party: loadPartyROI, death: loadDeathROI, status: loadStatusROI, target: loadTargetROI };
+		const loaders = { party: loadPartyROI, death: loadDeathROI, status: loadStatusROI, target: loadTargetROI, "chat-text": loadChatTextROI };
 		await loaders[kind]();
+		if (kind === "chat-text") document.getElementById("chatTextClickEnabled").checked = false;
 		scheduleLiveConfig();
 	} catch (error) {
 		console.error("Failed to reset ROI", error);
@@ -1280,15 +1514,117 @@ function buildEmergencySkills() {
 			'<label class="emergency-target-label" for="emergencyNeedTarget' + slot + '">' +
 				'<input class="emergency-needs-target" type="checkbox" id="emergencyNeedTarget' + slot + '" disabled>Need Target' +
 			'</label>' +
+			'<div class="click-area-controls" id="clickAreaControlsEmergency' + slot + '" hidden>' +
+				'<span class="click-area-status" id="clickAreaStatusEmergency' + slot + '">Area not set</span>' +
+				'<div class="click-area-buttons">' +
+					'<button type="button" onclick="openClickSkillPicker(\'Emergency' + slot + '\')">SET AREA</button>' +
+					'<button type="button" id="clickAreaResetEmergency' + slot + '" onclick="resetClickSkillArea(\'Emergency' + slot + '\')">RESET</button>' +
+				'</div>' +
+			'</div>' +
 			'</div>';
 	}).join("");
 	syncEmergencySkillSlots();
 }
 
 const supportSkillSlots = [
-	["1", 0x31], ["2", 0x32], ["3", 0x33], ["4", 0x34], ["5", 0x35],
-	["6", 0x36], ["7", 0x37], ["8", 0x38], ["9", 0x39], ["0", 0x30]
+	["1", 0x31], ["2", 0x32], ["3", 0x33], ["4", 0x34], ["5", 0x35]
 ];
+
+const clickSkillSlots = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "0", "F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10", "HP", "TP", "AutoAccept", "AutoResu", "DCOk", "ChatParty"];
+clickSkillSlots.push("Emergency1", "Emergency2", "Emergency3", "Emergency4", "Emergency5");
+
+function ensureClickTargetToggles() {
+	for (const slot of clickSkillSlots.slice(0, 20)) {
+		const delay = document.getElementById("delay" + slot);
+		if (!delay || document.getElementById("targetSearch" + slot)) continue;
+		const label = document.createElement("label");
+		label.className = "click-target-toggle";
+		label.hidden = true;
+		label.title = "Use this slot to search for a target until a whitelisted name is found.";
+		const checkbox = document.createElement("input");
+		checkbox.type = "checkbox";
+		checkbox.id = "targetSearch" + slot;
+		label.appendChild(checkbox);
+		label.appendChild(document.createTextNode("Target?"));
+		delay.parentElement.insertBefore(label, delay);
+	}
+}
+
+function getTargetInputMethod() {
+	const selected = document.querySelector('input[name="targetInputMethod"]:checked');
+	return selected ? selected.value : "keyboard";
+}
+
+function isClickWhitelistMode() {
+	const selected = document.querySelector('input[name="clickTargetBehavior"]:checked');
+	return !!selected && selected.value === "whitelist";
+}
+
+async function loadClickSkillAreas() {
+	try {
+		const response = await fetch("/api/click-skill/areas", { cache: "no-store" });
+		const result = await response.json();
+		const areas = result.areas || {};
+		for (const slot of clickSkillSlots) {
+			const area = areas[slot];
+		const status = document.getElementById("clickAreaStatus" + slot);
+			const reset = document.getElementById("clickAreaReset" + slot);
+			if (!status || !reset) continue;
+			const selected = !!(area && area.selected);
+			status.textContent = selected ? "Area set" : "Area not set";
+			reset.disabled = !selected || !hasSelectedTargetWindow();
+		}
+	} catch (error) {
+		console.error("Failed to load click skill areas:", error);
+	}
+}
+
+async function openClickSkillPicker(slot) {
+	const hwnd = document.getElementById("windowSelect").value;
+	if (!hwnd) {
+		alert("Select a target window first.");
+		return;
+	}
+	const beforeResponse = await fetch("/api/click-skill/areas", { cache: "no-store" });
+	const beforeResult = await beforeResponse.json();
+	const beforeArea = JSON.stringify((beforeResult.areas || {})[slot] || null);
+	const response = await fetch("/api/click-skill/picker", {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify({ hwnd: hwnd, slot: slot })
+	});
+	const result = await response.json();
+	if (!result.success) {
+		alert(result.message || "Failed to open the skill area picker.");
+		return;
+	}
+	let refreshes = 0;
+	const timer = setInterval(async function() {
+		await loadClickSkillAreas();
+		const areaResponse = await fetch("/api/click-skill/areas", { cache: "no-store" });
+		const areaResult = await areaResponse.json();
+		const area = (areaResult.areas || {})[slot];
+		if ((area && area.selected && JSON.stringify(area) !== beforeArea) || ++refreshes >= 30) {
+			clearInterval(timer);
+			if (area && area.selected && JSON.stringify(area) !== beforeArea) scheduleLiveConfig();
+		}
+	}, 1000);
+}
+
+async function resetClickSkillArea(slot) {
+	const response = await fetch("/api/click-skill/reset", {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify({ slot: slot })
+	});
+	const result = await response.json();
+	if (!result.success) {
+		alert(result.message || "Failed to reset the skill area.");
+		return;
+	}
+	await loadClickSkillAreas();
+	scheduleLiveConfig();
+}
 
 function buildSupportSkills() {
 	const container = document.getElementById("supportSkills");
@@ -1336,29 +1672,41 @@ function syncSupportSkillSlots() {
 function syncEmergencySkillSlots() {
 	const enabled = hasSelectedTargetWindow() && document.getElementById("autoPotHP").checked;
 	const targetEnabled = enabled && targetROIReady;
+	const clickMode = getTargetInputMethod() === "click";
+	const clickWhitelistMode = clickMode && isClickWhitelistMode();
 	const panic = document.getElementById("assistPanicTarget");
 	if (panic) {
+		const panicLabel = panic.closest(".emergency-panic-row");
+		if (panicLabel) panicLabel.hidden = clickMode;
 		// A saved config can contain this option while the target ROI is not
 		// available yet. Keep an already enabled option clickable so the user can
 		// turn it off; only lock options that would turn it on.
-		panic.disabled = !targetEnabled && !panic.checked;
+		panic.disabled = clickMode || (!targetEnabled && !panic.checked);
 	}
 	for (let slot = 1; slot <= 5; slot++) {
 		const checkbox = document.getElementById("emergency" + slot);
 		const select = document.getElementById("emergencySlot" + slot);
 		const needsTarget = document.getElementById("emergencyNeedTarget" + slot);
 		if (!checkbox || !select || !needsTarget) continue;
+		const targetLabel = needsTarget.closest(".emergency-target-label");
+		const clickControls = document.getElementById("clickAreaControlsEmergency" + slot);
 		checkbox.disabled = !enabled;
 		select.disabled = !enabled || !checkbox.checked;
+		if (targetLabel) targetLabel.hidden = clickMode && !clickWhitelistMode;
+		if (clickControls) clickControls.hidden = !clickMode;
 		// Same rule for loaded Need Target slots: they must remain uncheckable
 		// even before the Target panel has been selected again.
 		needsTarget.disabled = !targetEnabled && !needsTarget.checked;
 	}
 	const hint = document.getElementById("emergencyTargetHint");
 	if (hint) {
-		hint.innerText = targetROIReady
-			? "Need Target skills use the selected Target panel. In normal assist mode KaTools never sends E."
-			: "Set Target panel area first to enable Need Target or Assist Panic Target.";
+		hint.innerText = clickMode
+			? (clickWhitelistMode
+				? "In Whitelist Target mode, Need Target Emergency skills wait for a whitelisted target. Set a click area for each Emergency slot you enable."
+				: "Without Name mode Emergency skills do not wait for a target. Set a click area for each Emergency slot you enable.")
+			: (targetROIReady
+				? "Need Target skills use the selected Target panel. In normal assist mode KaTools never sends E."
+				: "Set Target panel area first to enable Need Target or Assist Panic Target.");
 	}
 }
 
@@ -1401,40 +1749,11 @@ function getConfig() {
 			delay: Number(document.getElementById("delay5").value)
 		},
 
-		{
-			name: "6",
-			vk: 0x36,
-			enabled: document.getElementById("skill6").checked,
-			delay: Number(document.getElementById("delay6").value)
-		},
-
-		{
-			name: "7",
-			vk: 0x37,
-			enabled: document.getElementById("skill7").checked,
-			delay: Number(document.getElementById("delay7").value)
-		},
-
-		{
-			name: "8",
-			vk: 0x38,
-			enabled: document.getElementById("skill8").checked,
-			delay: Number(document.getElementById("delay8").value)
-		},
-
-		{
-			name: "9",
-			vk: 0x39,
-			enabled: document.getElementById("skill9").checked,
-			delay: Number(document.getElementById("delay9").value)
-		},
-
-		{
-			name: "0",
-			vk: 0x30,
-			enabled: document.getElementById("skill0").checked,
-			delay: Number(document.getElementById("delay0").value)
-		},
+		{ name: "6", vk: 0x36, enabled: document.getElementById("skill6").checked, delay: Number(document.getElementById("delay6").value) },
+		{ name: "7", vk: 0x37, enabled: document.getElementById("skill7").checked, delay: Number(document.getElementById("delay7").value) },
+		{ name: "8", vk: 0x38, enabled: document.getElementById("skill8").checked, delay: Number(document.getElementById("delay8").value) },
+		{ name: "9", vk: 0x39, enabled: document.getElementById("skill9").checked, delay: Number(document.getElementById("delay9").value) },
+		{ name: "0", vk: 0x30, enabled: document.getElementById("skill0").checked, delay: Number(document.getElementById("delay0").value) },
 
 		{
 			name: "F1",
@@ -1506,7 +1825,15 @@ function getConfig() {
 			delay: Number(document.getElementById("delayF10").value)
 		}
 
-	];
+	].map(function(skill) {
+		const targetSearch = document.getElementById("targetSearch" + skill.name);
+		skill.targetSearch = !!(targetSearch && targetSearch.checked);
+		return skill;
+	}).filter(function(skill) {
+		const numberSlot = skill.vk >= 0x30 && skill.vk <= 0x39;
+		const functionSlot = skill.vk >= 0x70 && skill.vk <= 0x79;
+		return numberSlot || functionSlot;
+	});
 
 	const supportSkills = supportSkillSlots.map(function(entry) {
 		const name = entry[0];
@@ -1541,6 +1868,21 @@ function getConfig() {
 
 		targetEnabled:
 			getTargetMode() === "normal",
+
+		targetWithClick:
+			getTargetInputMethod() === "click",
+
+		inputMethod:
+			getTargetInputMethod(),
+
+		clickWhitelistMode:
+			getTargetInputMethod() === "click" && isClickWhitelistMode(),
+
+		clickWhitelistTargetNames:
+			document.getElementById("clickWhitelistTargetNames").value,
+		chatTextClickEnabled: document.getElementById("chatTextClickEnabled").checked && getTargetInputMethod() === "click",
+		chatTextClickKeyword: document.getElementById("chatTextClickKeyword").value,
+		chatTextClickYOffset: Number(document.getElementById("chatTextClickYOffset").value),
 
 		targetUntilDeadEnabled:
 			getTargetMode() === "until",
@@ -1579,9 +1921,10 @@ function getConfig() {
 		emergencySkills: Array.from({ length: 5 }, function(_, index) {
 			const slot = index + 1;
 			return {
+				index: slot,
 				enabled: document.getElementById("autoPotHP").checked && document.getElementById("emergency" + slot).checked,
 				vk: Number(document.getElementById("emergencySlot" + slot).value),
-				needsTarget: document.getElementById("emergencyNeedTarget" + slot).checked
+				needsTarget: (getTargetInputMethod() !== "click" || isClickWhitelistMode()) && document.getElementById("emergencyNeedTarget" + slot).checked
 			};
 		}),
 
@@ -1736,6 +2079,8 @@ async function stopBot() {
 
 let liveConfigTimer = null;
 let savedWindowHWND = "";
+let clickSkillApplyRevision = 0;
+let clickSkillApplyRunning = false;
 
 function scheduleLiveConfig() {
 
@@ -1775,10 +2120,55 @@ async function applyLiveConfig() {
 	}
 }
 
+async function applyLiveClickSkills() {
+	clickSkillApplyRevision++;
+	if (!botRuntimeActive || getTargetInputMethod() !== "click" || clickSkillApplyRunning) return;
+	clickSkillApplyRunning = true;
+	const status = document.getElementById("skillLiveApplyStatus");
+	let appliedRevision = 0;
+	try {
+		while (appliedRevision !== clickSkillApplyRevision) {
+			const revision = clickSkillApplyRevision;
+			const config = getConfig();
+			const invalidSkill = config.skills.find(skill => skill.enabled && (!Number.isFinite(skill.delay) || skill.delay <= 0));
+			if (invalidSkill) {
+				status.textContent = "Skill " + invalidSkill.name + " needs an interval greater than zero.";
+				status.classList.add("error-text");
+				appliedRevision = revision;
+				continue;
+			}
+			status.textContent = "Applying Click skill changes...";
+			status.classList.remove("error-text");
+			const response = await fetch("/api/config/click-skills", {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify(config)
+			});
+			const result = await response.json();
+			if (!result.success) {
+				status.textContent = result.message || "Click skill changes could not be applied.";
+				status.classList.add("error-text");
+			} else {
+				status.textContent = "Click skill changes applied live.";
+				status.classList.remove("error-text");
+			}
+			appliedRevision = revision;
+		}
+	} catch (error) {
+		console.error("Failed to apply Click skill changes:", error);
+		status.textContent = "Could not reach KaTools to apply Click skill changes.";
+		status.classList.add("error-text");
+	} finally {
+		clickSkillApplyRunning = false;
+		if (appliedRevision !== clickSkillApplyRevision) applyLiveClickSkills();
+	}
+}
+
 function applySavedConfig(config) {
 	if (!config) {
 		return;
 	}
+	ensureClickTargetToggles();
 
 	savedWindowHWND = config.hwnd || "";
 	document.getElementById("autoAccept").checked = !!config.autoAcceptEnabled;
@@ -1789,6 +2179,15 @@ function applySavedConfig(config) {
 	document.getElementById("autoPauseDeath").checked = !!config.autoPauseDeathEnabled;
 	document.getElementById("autoResurrect").checked =
 		!!config.autoPauseDeathEnabled && !!config.autoResurrectEnabled;
+	const inputMethod = config.inputMethod || (config.targetWithClick ? "click" : "keyboard");
+	const inputMethodRadio = document.querySelector('input[name="targetInputMethod"][value="' + inputMethod + '"]');
+	if (inputMethodRadio) inputMethodRadio.checked = true;
+	const clickTargetBehavior = document.querySelector('input[name="clickTargetBehavior"][value="' + (config.clickWhitelistMode ? "whitelist" : "withoutName") + '"]');
+	if (clickTargetBehavior) clickTargetBehavior.checked = true;
+	document.getElementById("clickWhitelistTargetNames").value = config.clickWhitelistTargetNames || "";
+	document.getElementById("chatTextClickEnabled").checked = !!config.chatTextClickEnabled;
+	document.getElementById("chatTextClickKeyword").value = config.chatTextClickKeyword || "";
+	document.getElementById("chatTextClickYOffset").value = config.chatTextClickYOffset || 45;
 	setTargetMode(config.targetUntilDeadEnabled ? "until" : (config.targetEnabled ? "normal" : "assist"));
 	setTargetUntilRole(config.targetUntilDeadSupport ? "support" : "attacker");
 	document.getElementById("assistSkillSlot").value = config.assistSkillVK || "0";
@@ -1822,8 +2221,10 @@ function applySavedConfig(config) {
 	for (const skill of config.skills || []) {
 		const checkbox = document.getElementById("skill" + skill.name);
 		const delay = document.getElementById("delay" + skill.name);
+		const targetSearch = document.getElementById("targetSearch" + skill.name);
 		if (checkbox) checkbox.checked = !!skill.enabled;
 		if (delay) delay.value = skill.delay || "";
+		if (targetSearch) targetSearch.checked = !!skill.targetSearch;
 	}
 	for (const skill of config.supportSkills || []) {
 		const checkbox = document.getElementById("supportSkill" + skill.name);
@@ -2141,6 +2542,8 @@ function updateWindowDependentControls() {
 	loadPartyROI();
 	loadDeathROI();
 	loadTargetROI();
+	loadClickSkillAreas();
+	loadClickPopupScanAreas();
 	loadStatusROI();
 	syncTargetMode();
 	syncEmergencySkillSlots();
@@ -2303,6 +2706,7 @@ async function loadPartyROI() {
 }
 
 function updateAutoAcceptAvailability(selected) {
+	if (getTargetInputMethod() === "click") return;
 	const checkbox = document.getElementById("autoAccept");
 	const label = document.querySelector('label[for="autoAccept"]');
 
@@ -2334,6 +2738,7 @@ async function loadDeathROI() {
 }
 
 function updateAutoPauseDeathAvailability(selected) {
+	if (getTargetInputMethod() === "click") return;
 	const checkbox = document.getElementById("autoPauseDeath");
 	const label = document.querySelector('label[for="autoPauseDeath"]');
 	const autoResurrect = document.getElementById("autoResurrect");
@@ -2349,6 +2754,89 @@ function updateAutoPauseDeathAvailability(selected) {
 		label.title = "";
 		resuLabel.title = autoResurrect.disabled ? "Enable Auto Pause on Death first." : "";
 	}
+}
+
+async function loadClickPopupScanAreas() {
+	const hwnd = document.getElementById("windowSelect").value;
+	if (!hwnd) return;
+	for (const kind of ["party", "death", "dc"]) {
+		try {
+			const response = await fetch("/api/click-popup-scan?kind=" + encodeURIComponent(kind) + "&hwnd=" + encodeURIComponent(hwnd));
+			const result = await response.json();
+			const suffix = kind[0].toUpperCase() + kind.slice(1);
+			const status = document.getElementById("clickPopupScanStatus" + suffix);
+			const preview = document.getElementById("clickPopupScanPreview" + suffix);
+			if (!result.success || !result.selected) {
+				status.textContent = "Scan area not set";
+				if (preview.dataset.objectUrl) URL.revokeObjectURL(preview.dataset.objectUrl);
+				delete preview.dataset.objectUrl;
+				preview.removeAttribute("src");
+				preview.style.display = "none";
+				if (getTargetInputMethod() === "click" && kind === "party") updateAutoAcceptClickAvailability(false);
+				if (getTargetInputMethod() === "click" && kind === "death") updateAutoPauseDeathClickAvailability(false);
+				continue;
+			}
+			status.textContent = "Scan area: X=" + result.x + " Y=" + result.y + " W=" + result.w + " H=" + result.h + (result.custom ? " (custom)" : " (default)");
+			try {
+				const imageResponse = await fetch("/api/click-popup-scan/preview?kind=" + encodeURIComponent(kind) + "&t=" + Date.now());
+				if (imageResponse.ok) {
+					if (preview.dataset.objectUrl) URL.revokeObjectURL(preview.dataset.objectUrl);
+					preview.dataset.objectUrl = URL.createObjectURL(await imageResponse.blob());
+					preview.src = preview.dataset.objectUrl;
+					preview.style.display = "block";
+				} else {
+					if (preview.dataset.objectUrl) URL.revokeObjectURL(preview.dataset.objectUrl);
+					delete preview.dataset.objectUrl;
+					preview.removeAttribute("src");
+					preview.style.display = "none";
+				}
+			} catch (_) { preview.style.display = "none"; }
+			if (getTargetInputMethod() === "click" && kind === "party") updateAutoAcceptClickAvailability(true);
+			if (getTargetInputMethod() === "click" && kind === "death") updateAutoPauseDeathClickAvailability(true);
+		} catch (error) {
+			console.error("Failed to load Click popup scan area:", kind, error);
+		}
+	}
+}
+
+function updateAutoAcceptClickAvailability(selected) {
+	const checkbox = document.getElementById("autoAccept");
+	const label = document.querySelector('label[for="autoAccept"]');
+	checkbox.disabled = !selected || !hasSelectedTargetWindow();
+	if (!selected) { checkbox.checked = false; label.title = "Select the Click Party popup scan area first."; }
+	else label.title = "";
+}
+
+function updateAutoPauseDeathClickAvailability(selected) {
+	const checkbox = document.getElementById("autoPauseDeath");
+	const label = document.querySelector('label[for="autoPauseDeath"]');
+	const resu = document.getElementById("autoResurrect");
+	const resuLabel = document.querySelector('label[for="autoResurrect"]');
+	checkbox.disabled = !selected || !hasSelectedTargetWindow();
+	resu.disabled = !selected || !hasSelectedTargetWindow() || !checkbox.checked;
+	if (!selected) { checkbox.checked = false; resu.checked = false; label.title = "Select the Click Death / Resu popup scan area first."; resuLabel.title = "Select the Click Death / Resu scan area and enable Auto Pause on Death first."; }
+	else { label.title = ""; resuLabel.title = resu.disabled ? "Enable Auto Pause on Death first." : ""; }
+}
+
+async function openClickPopupScanPicker(kind) {
+	const hwnd = document.getElementById("windowSelect").value;
+	if (!hwnd) { alert("Select the game window first."); return; }
+	const response = await fetch("/api/click-popup-scan/picker", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ hwnd: hwnd, kind: kind }) });
+	const result = await response.json();
+	if (!result.success) { alert(result.message || "Failed to open popup scan area picker."); return; }
+	let refreshes = 0;
+	const timer = setInterval(async function() { await loadClickPopupScanAreas(); if (++refreshes >= 30) clearInterval(timer); }, 1000);
+}
+
+async function resetClickPopupScanArea(kind) {
+	if (!confirm("Clear this Click popup scan area? Its coordinates and preview will be removed.")) return;
+	const response = await fetch("/api/click-popup-scan/reset?kind=" + encodeURIComponent(kind), { method: "POST" });
+	const result = await response.json();
+	if (!result.success) { alert(result.message || "Failed to reset popup scan area."); return; }
+	if (getTargetInputMethod() === "click" && kind === "party") updateAutoAcceptClickAvailability(false);
+	if (getTargetInputMethod() === "click" && kind === "death") updateAutoPauseDeathClickAvailability(false);
+	await loadClickPopupScanAreas();
+	scheduleLiveConfig();
 }
 
 async function loadTargetROI() {
@@ -2371,6 +2859,27 @@ async function loadTargetROI() {
 	} catch (error) {
 		console.error("Failed to load target monster ROI:", error);
 	}
+}
+
+async function loadChatTextROI() {
+	try {
+		const response = await fetch("/api/chat-text-roi");
+		const result = await response.json();
+		const info = document.getElementById("chatTextROIInfo");
+		info.textContent = result.success && result.selected
+			? "Scan area: X=" + result.x + " Y=" + result.y + " W=" + result.w + " H=" + result.h
+			: "Scan area not set";
+	} catch (error) { console.error("Failed to load chat scan area", error); }
+}
+
+async function openChatTextPicker() {
+	const hwnd = document.getElementById("windowSelect").value;
+	if (!hwnd) { alert("Select the game window first."); return; }
+	const response = await fetch("/api/chat-text-roi/picker", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ hwnd: hwnd }) });
+	const result = await response.json();
+	if (!result.success) { alert(result.message || "Failed to open chat scan area picker."); return; }
+	let refreshes = 0;
+	const timer = setInterval(async function() { await loadChatTextROI(); if (++refreshes >= 30) clearInterval(timer); }, 1000);
 }
 
 function updateTargetUntilAvailability(selected) {
@@ -2419,11 +2928,48 @@ function syncTargetNameFilterMode() {
 }
 
 function syncTargetMode() {
+	ensureClickTargetToggles();
 	const windowReady = hasSelectedTargetWindow();
+	const clickMode = getTargetInputMethod() === "click";
+	const clickWhitelistMode = clickMode && isClickWhitelistMode();
+	document.body.classList.toggle("click-whitelist-mode", clickWhitelistMode);
+	document.body.classList.toggle("click-input-mode", clickMode);
 	const untilRadio = document.getElementById("targetUntilDead");
 	untilRadio.disabled = false;
 	const mode = getTargetMode();
 	const supportMode = mode === "until" && getTargetUntilRole() === "support";
+	document.getElementById("targetPanelAreaSection").hidden = clickMode && !clickWhitelistMode;
+	document.getElementById("clickTargetBehavior").hidden = !clickMode;
+	document.getElementById("clickWhitelistNamesSettings").hidden = !clickWhitelistMode;
+	document.getElementById("clickWhitelistTargetNames").disabled = !windowReady || !clickWhitelistMode;
+	document.getElementById("keyboardActionsGrid").hidden = clickMode;
+	document.getElementById("autoPotClickHint").hidden = !clickMode;
+	const globalClickAreas = document.getElementById("clickGlobalActionAreas");
+	if (globalClickAreas) globalClickAreas.hidden = !clickMode;
+	const clickPopupScans = document.getElementById("clickPopupScanAreas");
+	if (clickPopupScans) clickPopupScans.hidden = !clickMode;
+	const chatTextSettings = document.getElementById("chatTextClickSettings");
+	if (chatTextSettings) chatTextSettings.hidden = !clickMode;
+	document.getElementById("chatTextClickEnabled").disabled = !windowReady || !clickMode;
+	document.getElementById("chatTextClickKeyword").disabled = !windowReady || !clickMode;
+	document.getElementById("chatTextClickYOffset").disabled = !windowReady || !clickMode;
+	for (const id of ["partyROIInfo", "partyROIPreview", "deathROIInfo", "deathROIPreview"]) {
+		const element = document.getElementById(id);
+		if (element) element.hidden = clickMode;
+	}
+	document.getElementById("autoPotHPSlot").hidden = clickMode;
+	document.getElementById("autoPotTPSlot").hidden = clickMode;
+	for (const method of document.querySelectorAll('input[name="targetInputMethod"]')) {
+		method.disabled = !windowReady;
+	}
+	document.getElementById("skillInputHint").textContent = clickMode
+		? "Select from slots 1–0 and F1–F10, set each click area, and enter its repeat interval in seconds."
+		: "Check the skills to run and enter each interval in seconds. For this test, only slots 1–5 are enabled.";
+	if (clickWhitelistMode) {
+		document.getElementById("skillInputHint").textContent = "Target? slots repeat while searching; unchecked slots stay held until the target name matches the whitelist. Each slot uses its own click area and interval.";
+	} else if (!clickMode) {
+		document.getElementById("skillInputHint").textContent = "Check any slots 1–0 or F1–F10 to run and enter each interval in seconds.";
+	}
 	const usesSkipNames = mode === "normal" || mode === "until";
 	// Target Until Dead always identifies names. If a user switches from
 	// Target > Without name, restore a real filter before enabling it.
@@ -2440,9 +2986,31 @@ function syncTargetMode() {
 	document.getElementById("targetSkipNamesSettings").hidden = !usesSkipNames;
 	document.getElementById("targetUntilDeadCharacterName").disabled = !windowReady || !usesNameList;
 	document.getElementById("targetUntilSettings").hidden = mode !== "until";
-	document.getElementById("targetSupportSkills").hidden = !supportMode;
-	document.getElementById("normalNumberSkillsSection").hidden = supportMode;
-	document.getElementById("normalFunctionSkillsSection").hidden = supportMode;
+	document.getElementById("targetSupportSkills").hidden = clickMode || !supportMode;
+	document.getElementById("normalNumberSkillsSection").hidden = !clickMode && supportMode;
+	document.getElementById("normalFunctionSkillsSection").hidden = !clickMode && supportMode;
+	for (const extraSkill of document.querySelectorAll(".click-only-skill")) {
+		extraSkill.hidden = !clickMode && supportMode;
+	}
+	for (const controls of document.querySelectorAll(".click-area-controls")) {
+		controls.hidden = !clickMode;
+	}
+	document.getElementById("attackActionCard").hidden = clickMode;
+	document.getElementById("pickActionCard").hidden = clickMode;
+	for (const skillCheck of document.querySelectorAll(".skill-check")) {
+		skillCheck.disabled = !windowReady || (!clickMode && supportMode);
+	}
+	for (const skillDelay of document.querySelectorAll(".skill-delay")) {
+		skillDelay.hidden = false;
+		skillDelay.disabled = !windowReady || (!clickMode && supportMode);
+	}
+	for (const toggle of document.querySelectorAll(".click-target-toggle")) {
+		toggle.hidden = !clickWhitelistMode;
+		toggle.querySelector("input").disabled = !windowReady || !clickWhitelistMode;
+	}
+	for (const behavior of document.querySelectorAll('input[name="clickTargetBehavior"]')) {
+		behavior.disabled = !windowReady || !clickMode;
+	}
 	for (const role of document.querySelectorAll('input[name="targetUntilRole"]')) {
 		role.disabled = !windowReady || mode !== "until";
 	}
@@ -2453,9 +3021,16 @@ function syncTargetMode() {
 	syncTargetNameFilterMode();
 	// Keep the saved Attack checkbox intact for Attacker mode, but do not allow
 	// R to compete with Support Skills while Support is selected.
+	document.getElementById("attackActionCard").hidden = clickMode;
+	document.getElementById("pickActionCard").hidden = clickMode;
 	document.getElementById("attack").disabled = !windowReady || supportMode;
 	document.getElementById("attackDelay").disabled = !windowReady || supportMode;
+	document.getElementById("pick").disabled = !windowReady;
+	document.getElementById("pickDelay").disabled = !windowReady;
+	document.getElementById("pickDelay").hidden = false;
 	syncSupportSkillSlots();
+	syncEmergencySkillSlots();
+	loadClickSkillAreas();
 }
 
 async function loadTargetPreview() {
@@ -2710,6 +3285,8 @@ async function initializeUI() {
 	loadDeathROI();
 	loadDeathPreview();
 	loadTargetROI();
+	loadChatTextROI();
+	loadClickSkillAreas();
 	loadTargetPreview();
 	loadStatusROI();
 	loadStatusPreview();
@@ -2776,11 +3353,23 @@ document.addEventListener("input", function(event) {
 // Apply after a control's value is committed. In particular, number inputs
 // must not restart the scheduler while the user is still typing a value.
 document.addEventListener("change", function(event) {
+	const clickSkillScheduleChanged = getTargetInputMethod() === "click" &&
+		(event.target.classList.contains("skill-check") || event.target.classList.contains("skill-delay"));
+	if (clickSkillScheduleChanged) applyLiveClickSkills();
 	if (event.target.name === "targetMode" || event.target.name === "targetUntilRole" || event.target.name === "targetNameFilterMode") {
 		syncTargetMode();
 	}
+	if (event.target.name === "targetInputMethod") {
+		syncTargetMode();
+		loadClickSkillAreas();
+		loadClickPopupScanAreas();
+	}
+	if (event.target.name === "clickTargetBehavior") {
+		syncTargetMode();
+	}
 	if (event.target.id === "autoPauseDeath") {
-		loadDeathROI();
+		if (getTargetInputMethod() === "click") loadClickPopupScanAreas();
+		else loadDeathROI();
 	}
 	if (event.target.id === "autoPotHP" || event.target.classList.contains("emergency-check") || event.target.classList.contains("emergency-needs-target")) {
 		syncEmergencySkillSlots();
@@ -2788,7 +3377,7 @@ document.addEventListener("change", function(event) {
 	if (event.target.classList.contains("support-skill-check")) {
 		syncSupportSkillSlots();
 	}
-	if (event.target.id !== "windowSelect") {
+	if (event.target.id !== "windowSelect" && !clickSkillScheduleChanged) {
 		scheduleLiveConfig();
 	}
 });
@@ -2821,8 +3410,15 @@ type WebBotConfig struct {
 	TargetUntilDeadSupport       bool    `json:"targetUntilDeadSupport"`
 	TargetUntilDeadCharacterName string  `json:"targetUntilDeadCharacterName"`
 	TargetNameFilterMode         string  `json:"targetNameFilterMode"`
+	ClickWhitelistMode           bool    `json:"clickWhitelistMode"`
+	ClickWhitelistTargetNames    string  `json:"clickWhitelistTargetNames"`
+	ChatTextClickEnabled         bool    `json:"chatTextClickEnabled"`
+	ChatTextClickKeyword         string  `json:"chatTextClickKeyword"`
+	ChatTextClickYOffset         int     `json:"chatTextClickYOffset"`
 
 	TargetEnabled     bool    `json:"targetEnabled"`
+	InputMethod       string  `json:"inputMethod"`
+	TargetWithClick   bool    `json:"targetWithClick"`
 	TargetWithoutName bool    `json:"targetWithoutName"`
 	TargetDelay       float64 `json:"targetDelay"`
 
@@ -2842,10 +3438,36 @@ type WebBotConfig struct {
 	AssistPanicTarget bool                      `json:"assistPanicTarget"`
 
 	// Skills is the established Attacker/normal profile. SupportSkills is a
-	// separate 1–0 profile selected only by Target Until Dead > Support, so
+	// separate 1–5 profile selected only by Target Until Dead > Support, so
 	// switching roles never overwrites an existing working attacker setup.
 	Skills        []WebSkillConfig        `json:"skills"`
 	SupportSkills []WebSupportSkillConfig `json:"supportSkills"`
+}
+
+// ClickMethod is the global input selection. TargetWithClick remains as a
+// legacy fallback so existing saved profiles continue to work.
+func (cfg WebBotConfig) ClickMethod() bool {
+	switch strings.ToLower(strings.TrimSpace(cfg.InputMethod)) {
+	case "click":
+		return true
+	case "keyboard":
+		return false
+	default:
+		return cfg.TargetWithClick
+	}
+}
+
+func normalizeInputMethod(cfg *WebBotConfig) {
+	if cfg == nil {
+		return
+	}
+	if cfg.ClickMethod() {
+		cfg.InputMethod = "click"
+		cfg.TargetWithClick = true
+	} else {
+		cfg.InputMethod = "keyboard"
+		cfg.TargetWithClick = false
+	}
 }
 
 // usesTargetNameFilter is deliberately false for Target without name even
@@ -2853,12 +3475,29 @@ type WebBotConfig struct {
 // key-only target loop: it must neither need a Target ROI nor hold skills for
 // target-name OCR.
 func usesTargetNameFilter(cfg WebBotConfig) bool {
+	if cfg.ClickMethod() {
+		return cfg.ClickWhitelistMode
+	}
 	withoutName := cfg.TargetWithoutName || strings.EqualFold(strings.TrimSpace(cfg.TargetNameFilterMode), "none")
 	return cfg.TargetUntilDeadEnabled ||
 		(cfg.TargetEnabled && !withoutName && strings.TrimSpace(cfg.TargetUntilDeadCharacterName) != "")
 }
 
+func usesTargetBarMonitor(cfg WebBotConfig) bool {
+	return usesTargetNameFilter(cfg)
+}
+
+func targetNameFilterValues(cfg WebBotConfig) (string, string) {
+	if cfg.ClickMethod() && cfg.ClickWhitelistMode {
+		return cfg.ClickWhitelistTargetNames, targetNameFilterModeWhitelist
+	}
+	return cfg.TargetUntilDeadCharacterName, cfg.TargetNameFilterMode
+}
+
 func requiresTargetNameWhitelist(cfg WebBotConfig) bool {
+	if cfg.ClickMethod() {
+		return cfg.ClickWhitelistMode && strings.TrimSpace(cfg.ClickWhitelistTargetNames) == ""
+	}
 	withoutName := cfg.TargetWithoutName || strings.EqualFold(strings.TrimSpace(cfg.TargetNameFilterMode), "none")
 	usesNameList := cfg.TargetUntilDeadEnabled || (cfg.TargetEnabled && !withoutName)
 	return usesNameList &&
@@ -2867,16 +3506,24 @@ func requiresTargetNameWhitelist(cfg WebBotConfig) bool {
 }
 
 type WebEmergencySkillConfig struct {
-	Enabled     bool    `json:"enabled"`
-	VK          uintptr `json:"vk"`
-	NeedsTarget bool    `json:"needsTarget"`
+	Index                int     `json:"index"`
+	Enabled              bool    `json:"enabled"`
+	VK                   uintptr `json:"vk"`
+	NeedsTarget          bool    `json:"needsTarget"`
+	Click                bool    `json:"-"`
+	ClickAreaSet         bool    `json:"-"`
+	ClickX               int     `json:"-"`
+	ClickY               int     `json:"-"`
+	ClickReferenceWidth  int     `json:"-"`
+	ClickReferenceHeight int     `json:"-"`
 }
 
 type WebSkillConfig struct {
-	Name    string  `json:"name"`
-	VK      uintptr `json:"vk"`
-	Enabled bool    `json:"enabled"`
-	Delay   float64 `json:"delay"`
+	Name         string  `json:"name"`
+	VK           uintptr `json:"vk"`
+	Enabled      bool    `json:"enabled"`
+	Delay        float64 `json:"delay"`
+	TargetSearch bool    `json:"targetSearch"`
 }
 
 type WebSupportSkillConfig struct {
@@ -2894,7 +3541,10 @@ func validateAutoResurrectConfig(cfg WebBotConfig) string {
 	if !cfg.AutoPauseDeathEnabled {
 		return "Enable Auto Pause on Death before enabling Auto Resu."
 	}
-	if !LoadDeathROI().Selected {
+	if cfg.ClickMethod() && !LoadClickPopupScanAreas()["death"].ROI.Selected {
+		return "Select the Click Death / Resu scan area before enabling Auto Resu."
+	}
+	if !cfg.ClickMethod() && !LoadDeathROI().Selected {
 		return "Select the full death dialog area before enabling Auto Resu."
 	}
 	if cfg.AutoPotHPPercent <= 0 {
@@ -2940,32 +3590,32 @@ func validateNumericConfig(cfg WebBotConfig) string {
 			return message
 		}
 	}
-	if cfg.AssistSkillVK != 0 {
+	if cfg.AssistSkillVK != 0 && !cfg.ClickMethod() {
 		if message := validPositive(cfg.AssistSkillDelay, "Assist skill interval"); message != "" {
 			return message
 		}
 	}
-	if cfg.TargetEnabled {
+	if !cfg.ClickMethod() && cfg.TargetEnabled {
 		if message := validPositive(cfg.TargetDelay, "Target interval"); message != "" {
 			return message
 		}
 	}
-	if cfg.AttackEnabled && !(cfg.TargetUntilDeadEnabled && cfg.TargetUntilDeadSupport) {
+	if !cfg.ClickMethod() && cfg.AttackEnabled && !(cfg.TargetUntilDeadEnabled && cfg.TargetUntilDeadSupport) {
 		if message := validPositive(cfg.AttackDelay, "Attack interval"); message != "" {
 			return message
 		}
 	}
-	if cfg.PickEnabled {
+	if !cfg.ClickMethod() && cfg.PickEnabled {
 		if message := validPositive(cfg.PickDelay, "Pick interval"); message != "" {
 			return message
 		}
 	}
 	activeSkills := cfg.Skills
-	if cfg.TargetUntilDeadEnabled && cfg.TargetUntilDeadSupport {
+	if !cfg.ClickMethod() && cfg.TargetUntilDeadEnabled && cfg.TargetUntilDeadSupport {
 		for _, skill := range cfg.SupportSkills {
 			if skill.Enabled {
-				if skill.VK < 0x30 || skill.VK > 0x39 {
-					return "Support Skills may use only 1 through 0."
+				if skill.VK < 0x31 || skill.VK > 0x35 {
+					return "Support Skills may use only 1 through 5."
 				}
 				if message := validPositive(skill.Delay, "Support Skill "+skill.Name+" interval"); message != "" {
 					return message
@@ -2981,6 +3631,73 @@ func validateNumericConfig(cfg WebBotConfig) string {
 			}
 		}
 	}
+	return ""
+}
+
+func validateClickSkillAreas(cfg WebBotConfig) string {
+	if !cfg.ClickMethod() {
+		return ""
+	}
+	areas := LoadClickSkillROIs()
+	for _, skill := range cfg.Skills {
+		if !skill.Enabled || !isClickSkillVK(skill.VK) {
+			continue
+		}
+		if roi, ok := areas[skill.Name]; !ok || !roi.Selected {
+			return "Set the click area for Skill " + skill.Name + " before starting."
+		}
+	}
+	return ""
+}
+
+func validateClickEmergencyAreas(cfg WebBotConfig) string {
+	if !cfg.ClickMethod() {
+		return ""
+	}
+	areas := LoadClickSkillROIs()
+	for index, skill := range cfg.EmergencySkills {
+		if !skill.Enabled {
+			continue
+		}
+		slot := skill.Index
+		if slot < 1 || slot > emergencySkillSlotCount {
+			slot = index + 1
+		}
+		key := fmt.Sprintf("Emergency%d", slot)
+		if roi, ok := areas[key]; !ok || !roi.Selected {
+			return fmt.Sprintf("Set the click area for Emergency Skill %d before starting.", slot)
+		}
+	}
+	return ""
+}
+
+func validateAutoPotClickArea(cfg WebBotConfig) string {
+	if !cfg.ClickMethod() {
+		return ""
+	}
+	areas := LoadClickSkillROIs()
+	if cfg.AutoPotHPEnabled && !areas["HP"].Selected {
+		return "Set the HP Pot click area before starting."
+	}
+	if cfg.AutoPotTPEnabled && !areas["TP"].Selected {
+		return "Set the TP Pot click area before starting."
+	}
+	return ""
+}
+
+func validateClickActionAreas(cfg WebBotConfig) string {
+	if !cfg.ClickMethod() {
+		return ""
+	}
+	areas := LoadClickSkillROIs()
+	if cfg.AutoAcceptEnabled && !areas["AutoAccept"].Selected {
+		return "Set the Auto Accept Party click area before starting."
+	}
+	if cfg.AutoResurrectEnabled && !areas["AutoResu"].Selected {
+		return "Set the Auto Resu click area before starting."
+	}
+	// The DC dialog may still be monitored in Click Method, but configuring
+	// its OK point is optional. If unset, acknowledgement simply cannot click.
 	return ""
 }
 
@@ -3475,6 +4192,87 @@ func newWebUIMux(
 		handleROIReset(w, r, "death")
 	})
 
+	mux.HandleFunc("/api/click-popup-scan", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		kind := r.URL.Query().Get("kind")
+		if !validClickPopupScanKind(kind) {
+			writeJSONError(w, "Unknown Click popup scan area")
+			return
+		}
+		area := LoadClickPopupScanAreas()[kind]
+		if hwnd, err := parseHWND(r.URL.Query().Get("hwnd")); err == nil && hwnd != 0 {
+			if clientRect, rectErr := getPickerWindowRect(hwnd); rectErr == nil {
+				if mapped, ok := LoadClickPopupScanAreaForClient(kind,
+					int(clientRect.Right-clientRect.Left), int(clientRect.Bottom-clientRect.Top)); ok {
+					area = mapped
+				}
+			}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": true, "selected": area.ROI.Selected, "custom": area.Custom,
+			"x": area.ROI.X, "y": area.ROI.Y, "w": area.ROI.Width, "h": area.ROI.Height,
+		})
+	})
+
+	mux.HandleFunc("/api/click-popup-scan/preview", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		kind := r.URL.Query().Get("kind")
+		if !validClickPopupScanKind(kind) {
+			http.Error(w, "unknown Click popup scan area", http.StatusBadRequest)
+			return
+		}
+		preview, ok := getClickPopupScanROIPreview("click-popup:" + kind)
+		if !ok {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "image/png")
+		w.Header().Set("Cache-Control", "no-store")
+		_, _ = w.Write(preview)
+	})
+
+	mux.HandleFunc("/api/click-popup-scan/picker", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		var request struct {
+			HWND string `json:"hwnd"`
+			Kind string `json:"kind"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			writeJSONError(w, "Invalid JSON: "+err.Error())
+			return
+		}
+		hwnd, err := parseHWND(request.HWND)
+		if err != nil {
+			writeJSONError(w, fmt.Sprintf("Invalid HWND: %v", err))
+			return
+		}
+		if err := openClickPopupScanROIPicker(windows.Handle(hwnd), request.Kind); err != nil {
+			writeJSONError(w, err.Error())
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{"success": true})
+	})
+
+	mux.HandleFunc("/api/click-popup-scan/reset", func(w http.ResponseWriter, r *http.Request) {
+		kind := r.URL.Query().Get("kind")
+		if !validClickPopupScanKind(kind) {
+			writeJSONError(w, "Unknown Click popup scan area")
+			return
+		}
+		handleROIReset(w, r, "click-popup-"+kind)
+	})
+
 	// ========================================================
 	// TARGET MONSTER HP BAR ROI
 	// ========================================================
@@ -3536,6 +4334,96 @@ func newWebUIMux(
 		handleROIReset(w, r, "target")
 	})
 
+	mux.HandleFunc("/api/chat-text-roi", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		area := LoadChatTextROI()
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{"success": true, "selected": area.ROI.Selected, "x": area.ROI.X, "y": area.ROI.Y, "w": area.ROI.Width, "h": area.ROI.Height})
+	})
+	mux.HandleFunc("/api/chat-text-roi/picker", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		var request struct {
+			HWND string `json:"hwnd"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			writeJSONError(w, "Invalid JSON: "+err.Error())
+			return
+		}
+		hwnd, err := parseHWND(request.HWND)
+		if err != nil {
+			writeJSONError(w, fmt.Sprintf("Invalid HWND: %v", err))
+			return
+		}
+		if err := openChatTextROIPicker(windows.Handle(hwnd)); err != nil {
+			writeJSONError(w, err.Error())
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{"success": true})
+	})
+	mux.HandleFunc("/api/chat-text-roi/reset", func(w http.ResponseWriter, r *http.Request) { handleROIReset(w, r, "chat-text") })
+
+	mux.HandleFunc("/api/click-skill/areas", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{"success": true, "areas": LoadClickSkillROIs()})
+	})
+
+	mux.HandleFunc("/api/click-skill/picker", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		var request struct {
+			HWND string `json:"hwnd"`
+			Slot string `json:"slot"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			writeJSONError(w, "Invalid JSON: "+err.Error())
+			return
+		}
+		hwnd, err := parseHWND(request.HWND)
+		if err != nil {
+			writeJSONError(w, fmt.Sprintf("Invalid HWND: %v", err))
+			return
+		}
+		if err := openClickSkillROIPicker(windows.Handle(hwnd), request.Slot); err != nil {
+			writeJSONError(w, err.Error())
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{"success": true})
+	})
+
+	mux.HandleFunc("/api/click-skill/reset", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		var request struct {
+			Slot string `json:"slot"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			writeJSONError(w, "Invalid JSON: "+err.Error())
+			return
+		}
+		if err := ResetPickedClickSkillROI(request.Slot); err != nil {
+			writeJSONError(w, err.Error())
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{"success": true})
+	})
+
 	// ========================================================
 	// LIVE CONFIG
 	// ========================================================
@@ -3591,6 +4479,7 @@ func newWebUIMux(
 				writeJSONError(w, "Invalid JSON: "+err.Error())
 				return
 			}
+			normalizeInputMethod(&request.Config)
 			if message := validateNumericConfig(request.Config); message != "" {
 				writeJSONError(w, message)
 				return
@@ -3609,6 +4498,25 @@ func newWebUIMux(
 		default:
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		}
+	})
+
+	mux.HandleFunc("/api/config/click-skills", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		var cfg WebBotConfig
+		if err := json.NewDecoder(r.Body).Decode(&cfg); err != nil {
+			writeJSONError(w, "Invalid JSON: "+err.Error())
+			return
+		}
+		normalizeInputMethod(&cfg)
+		if err := runtimeManager.UpdateClickSkills(cfg); err != nil {
+			writeJSONError(w, err.Error())
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{"success": true, "message": "Click skills applied live."})
 	})
 
 	mux.HandleFunc(
@@ -3640,12 +4548,25 @@ func newWebUIMux(
 				writeJSONError(w, "Invalid JSON: "+err.Error())
 				return
 			}
+			normalizeInputMethod(&cfg)
 			if message := validateNumericConfig(cfg); message != "" {
 				writeJSONError(w, message)
 				return
 			}
+			if message := validateAutoPotClickArea(cfg); message != "" {
+				writeJSONError(w, message)
+				return
+			}
+			if message := validateClickActionAreas(cfg); message != "" {
+				writeJSONError(w, message)
+				return
+			}
+			if message := validateChatTextClickConfig(cfg); message != "" {
+				writeJSONError(w, message)
+				return
+			}
 
-			if cfg.AutoAcceptEnabled && !ocrworker.LoadPartyROI().Selected {
+			if cfg.AutoAcceptEnabled && ((!cfg.ClickMethod() && !ocrworker.LoadPartyROI().Selected) || (cfg.ClickMethod() && !LoadClickPopupScanAreas()["party"].ROI.Selected)) {
 				writeJSONError(w, "Select Party OCR area before enabling Auto Accept Party.")
 				return
 			}
@@ -3653,7 +4574,7 @@ func newWebUIMux(
 				writeJSONError(w, "Select the HP / TP status area before enabling Auto Potion.")
 				return
 			}
-			if cfg.AutoPauseDeathEnabled && !LoadDeathROI().Selected {
+			if cfg.AutoPauseDeathEnabled && ((!cfg.ClickMethod() && !LoadDeathROI().Selected) || (cfg.ClickMethod() && !LoadClickPopupScanAreas()["death"].ROI.Selected)) {
 				writeJSONError(w, "Select the death dialog area before enabling Auto Pause on Death.")
 				return
 			}
@@ -3669,15 +4590,15 @@ func newWebUIMux(
 				writeJSONError(w, message)
 				return
 			}
-			if usesTargetNameFilter(cfg) && !LoadTargetROI().Selected {
-				writeJSONError(w, "Select the target name and HP bar before using Target Name Filter or Target Until Dead.")
+			if usesTargetBarMonitor(cfg) && !LoadTargetROI().Selected {
+				writeJSONError(w, "Select the target name and HP bar before using Whitelist Target, Target Name Filter, or Target Until Dead.")
 				return
 			}
 			if requiresTargetNameWhitelist(cfg) {
-				writeJSONError(w, "Enter one or more whitelist target names before enabling Target or Target Until Dead.")
+				writeJSONError(w, "Enter one or more whitelist target names before enabling this mode.")
 				return
 			}
-			if cfg.TargetUntilDeadEnabled && strings.TrimSpace(cfg.TargetUntilDeadCharacterName) == "" {
+			if !cfg.ClickMethod() && cfg.TargetUntilDeadEnabled && strings.TrimSpace(cfg.TargetUntilDeadCharacterName) == "" {
 				writeJSONError(w, "Enter one or more target names before enabling Target Until Dead.")
 				return
 			}
@@ -3713,7 +4634,12 @@ func newWebUIMux(
 				writeJSONError(w, "Invalid JSON: "+err.Error())
 				return
 			}
+			normalizeInputMethod(&cfg)
 			if message := validateNumericConfig(cfg); message != "" {
+				writeJSONError(w, message)
+				return
+			}
+			if message := validateChatTextClickConfig(cfg); message != "" {
 				writeJSONError(w, message)
 				return
 			}
@@ -3767,6 +4693,8 @@ func newWebUIMux(
 				return
 			}
 
+			normalizeInputMethod(&cfg)
+
 			if message := validateNumericConfig(cfg); message != "" {
 
 				writeJSONError(w, message)
@@ -3774,7 +4702,24 @@ func newWebUIMux(
 				return
 			}
 
-			if cfg.AutoAcceptEnabled && !ocrworker.LoadPartyROI().Selected {
+			if message := validateClickSkillAreas(cfg); message != "" {
+				writeJSONError(w, message)
+				return
+			}
+			if message := validateClickEmergencyAreas(cfg); message != "" {
+				writeJSONError(w, message)
+				return
+			}
+			if message := validateAutoPotClickArea(cfg); message != "" {
+				writeJSONError(w, message)
+				return
+			}
+			if message := validateClickActionAreas(cfg); message != "" {
+				writeJSONError(w, message)
+				return
+			}
+
+			if cfg.AutoAcceptEnabled && ((!cfg.ClickMethod() && !ocrworker.LoadPartyROI().Selected) || (cfg.ClickMethod() && !LoadClickPopupScanAreas()["party"].ROI.Selected)) {
 				writeJSONError(
 					w,
 					"Select Party OCR area before enabling Auto Accept Party.",
@@ -3790,7 +4735,7 @@ func newWebUIMux(
 				return
 			}
 
-			if cfg.AutoPauseDeathEnabled && !LoadDeathROI().Selected {
+			if cfg.AutoPauseDeathEnabled && ((!cfg.ClickMethod() && !LoadDeathROI().Selected) || (cfg.ClickMethod() && !LoadClickPopupScanAreas()["death"].ROI.Selected)) {
 				writeJSONError(
 					w,
 					"Select the death dialog area before enabling Auto Pause on Death.",
@@ -3813,10 +4758,10 @@ func newWebUIMux(
 				return
 			}
 
-			if usesTargetNameFilter(cfg) && !LoadTargetROI().Selected {
+			if usesTargetBarMonitor(cfg) && !LoadTargetROI().Selected {
 				writeJSONError(
 					w,
-					"Select the target name and HP bar before using Target Name Filter or Target Until Dead.",
+					"Select the target name and HP bar before using Whitelist Target, Target Name Filter, or Target Until Dead.",
 				)
 				return
 			}
@@ -3824,12 +4769,12 @@ func newWebUIMux(
 			if requiresTargetNameWhitelist(cfg) {
 				writeJSONError(
 					w,
-					"Enter one or more whitelist target names before enabling Target or Target Until Dead.",
+					"Enter one or more whitelist target names before enabling this mode.",
 				)
 				return
 			}
 
-			if cfg.TargetUntilDeadEnabled && strings.TrimSpace(cfg.TargetUntilDeadCharacterName) == "" {
+			if !cfg.ClickMethod() && cfg.TargetUntilDeadEnabled && strings.TrimSpace(cfg.TargetUntilDeadCharacterName) == "" {
 				writeJSONError(
 					w,
 					"Enter one or more target names before enabling Target Until Dead.",
@@ -4002,25 +4947,43 @@ func applyWebBotConfig(
 	)
 
 	autoPot.Update(cfg)
+	emergency.SetInputSender(bot.CastEmergencySkill)
+	clickAreas := LoadClickSkillROIs()
+	for index := range cfg.EmergencySkills {
+		slot := &cfg.EmergencySkills[index]
+		if slot.Index < 1 || slot.Index > emergencySkillSlotCount {
+			slot.Index = index + 1
+		}
+		if cfg.ClickMethod() {
+			area := clickAreas[fmt.Sprintf("Emergency%d", slot.Index)]
+			slot.Click = true
+			slot.ClickAreaSet = area.Selected
+			slot.ClickX = area.X + area.Width/2
+			slot.ClickY = area.Y + area.Height/2
+			slot.ClickReferenceWidth = area.ClientWidth
+			slot.ClickReferenceHeight = area.ClientHeight
+		}
+	}
 	emergency.Update(cfg)
 	deathPause.Update(cfg.AutoPauseDeathEnabled, cfg.AutoResurrectEnabled)
 	targetFilterEnabled := usesTargetNameFilter(cfg)
-	supportMode := cfg.TargetUntilDeadEnabled && cfg.TargetUntilDeadSupport
+	supportMode := !cfg.ClickMethod() && cfg.TargetUntilDeadEnabled && cfg.TargetUntilDeadSupport
+	targetNames, targetFilterMode := targetNameFilterValues(cfg)
 	targetUntil.Update(
-		cfg.TargetUntilDeadEnabled,
+		cfg.TargetUntilDeadEnabled && !cfg.ClickMethod(),
 		targetFilterEnabled,
 		supportMode,
-		cfg.TargetUntilDeadCharacterName,
-		cfg.TargetNameFilterMode,
+		targetNames,
+		targetFilterMode,
 	)
 	bot.SetTargetActionFilterEnabled(targetFilterEnabled)
-	bot.SetTargetActionReady(!targetFilterEnabled)
+	bot.SetTargetActionReady(!targetFilterEnabled && !cfg.ClickWhitelistMode)
 	bot.SetTargetPanelClear(false)
 
 	bot.mu.Lock()
 
 	bot.config.AssistEnabled =
-		!cfg.TargetEnabled && !cfg.TargetUntilDeadEnabled && cfg.AssistSkillVK != 0
+		!cfg.ClickMethod() && !cfg.TargetEnabled && !cfg.TargetUntilDeadEnabled && cfg.AssistSkillVK != 0
 
 	bot.config.AssistSkillVK =
 		cfg.AssistSkillVK
@@ -4031,7 +4994,7 @@ func applyWebBotConfig(
 		)
 
 	bot.config.TargetEnabled =
-		cfg.TargetEnabled && !cfg.TargetUntilDeadEnabled
+		!cfg.ClickMethod() && cfg.TargetEnabled && !cfg.TargetUntilDeadEnabled
 
 	bot.config.TargetDelay =
 		secondsToDuration(
@@ -4042,7 +5005,7 @@ func applyWebBotConfig(
 	// Attacker profile, but never schedule it while the Support profile owns
 	// Target Until Dead.
 	bot.config.AttackEnabled =
-		cfg.AttackEnabled && !supportMode
+		!cfg.ClickMethod() && cfg.AttackEnabled && !supportMode
 
 	bot.config.AttackDelay =
 		secondsToDuration(
@@ -4050,7 +5013,7 @@ func applyWebBotConfig(
 		)
 
 	bot.config.PickEnabled =
-		cfg.PickEnabled
+		!cfg.ClickMethod() && cfg.PickEnabled
 
 	bot.config.PickDelay =
 		secondsToDuration(
@@ -4063,10 +5026,11 @@ func applyWebBotConfig(
 			0,
 			len(cfg.Skills)+len(cfg.SupportSkills),
 		)
-
+	bot.config.ClickMode = cfg.ClickMethod()
+	bot.config.ClickWhitelistMode = cfg.ClickMethod() && cfg.ClickWhitelistMode
 	if supportMode {
 		for _, skill := range cfg.SupportSkills {
-			if skill.VK < 0x30 || skill.VK > 0x39 {
+			if skill.VK < 0x31 || skill.VK > 0x35 {
 				continue
 			}
 			bot.config.Skills = append(
@@ -4083,6 +5047,9 @@ func applyWebBotConfig(
 		}
 	} else {
 		for _, skill := range cfg.Skills {
+			if !isClickSkillVK(skill.VK) {
+				continue
+			}
 
 			bot.config.Skills =
 				append(
@@ -4094,6 +5061,13 @@ func applyWebBotConfig(
 						Delay: secondsToDuration(
 							skill.Delay,
 						),
+						Click:                cfg.ClickMethod(),
+						ClickAreaSet:         clickAreas[skill.Name].Selected,
+						ClickX:               clickAreas[skill.Name].X + clickAreas[skill.Name].Width/2,
+						ClickY:               clickAreas[skill.Name].Y + clickAreas[skill.Name].Height/2,
+						ClickReferenceWidth:  clickAreas[skill.Name].ClientWidth,
+						ClickReferenceHeight: clickAreas[skill.Name].ClientHeight,
+						TargetSearch:         cfg.ClickMethod() && cfg.ClickWhitelistMode && skill.TargetSearch,
 					},
 				)
 		}
@@ -4268,6 +5242,7 @@ func handleROIReset(w http.ResponseWriter, r *http.Request, kind string) {
 	}
 
 	var err error
+	previewKind := kind
 	switch kind {
 	case "party":
 		err = ocrworker.ResetPickedPartyROI()
@@ -4277,6 +5252,12 @@ func handleROIReset(w http.ResponseWriter, r *http.Request, kind string) {
 		err = ResetPickedDeathROI()
 	case "target":
 		err = ResetPickedTargetROI()
+	case "chat-text":
+		err = ResetPickedChatTextROI()
+	case "click-popup-party", "click-popup-death", "click-popup-dc":
+		popupKind := strings.TrimPrefix(kind, "click-popup-")
+		err = ResetClickPopupScanArea(popupKind)
+		previewKind = "click-popup:" + popupKind
 	default:
 		writeJSONError(w, "Unknown ROI kind")
 		return
@@ -4286,9 +5267,31 @@ func handleROIReset(w http.ResponseWriter, r *http.Request, kind string) {
 		return
 	}
 
-	clearROIPreview(kind)
+	clearROIPreview(previewKind)
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{"success": true})
+}
+
+func validateChatTextClickConfig(cfg WebBotConfig) string {
+	if !cfg.ChatTextClickEnabled {
+		return ""
+	}
+	if cfg.ChatTextClickYOffset < 0 || cfg.ChatTextClickYOffset > 200 {
+		return "Click-below-text offset must be between 0 and 200 pixels."
+	}
+	if !cfg.ClickMethod() {
+		return "Click Chat Keyword is available only with Click Method."
+	}
+	if strings.TrimSpace(cfg.ChatTextClickKeyword) == "" {
+		return "Enter the chat keyword to search for."
+	}
+	if !LoadChatTextROI().ROI.Selected {
+		return "Set the chat text scan area before enabling Click Chat Keyword."
+	}
+	if area, ok := LoadClickSkillROIs()["ChatParty"]; !ok || !area.Selected {
+		return "Set the Party target click point before enabling Click Chat Keyword."
+	}
+	return ""
 }
 
 func writeJSONError(

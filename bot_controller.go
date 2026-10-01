@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -19,8 +20,10 @@ type BotConfig struct {
 	AssistSkillVK    uintptr
 	AssistSkillDelay time.Duration
 
-	TargetEnabled bool
-	TargetDelay   time.Duration
+	TargetEnabled      bool
+	TargetDelay        time.Duration
+	ClickMode          bool
+	ClickWhitelistMode bool
 
 	AttackEnabled bool
 	AttackDelay   time.Duration
@@ -32,10 +35,16 @@ type BotConfig struct {
 }
 
 type SkillConfig struct {
-	Name    string
-	VK      uintptr
-	Enabled bool
-	Delay   time.Duration
+	Name                 string
+	VK                   uintptr
+	Enabled              bool
+	Delay                time.Duration
+	Click                bool
+	ClickAreaSet         bool
+	ClickX               int
+	ClickY               int
+	ClickReferenceWidth  int
+	ClickReferenceHeight int
 
 	// Support-only options. Normal attacker skills retain their existing
 	// behaviour because both fields default to false.
@@ -46,6 +55,7 @@ type SkillConfig struct {
 	// monster bar has disappeared and that disappearance has been confirmed.
 	BypassTargetGate   bool
 	WaitForTargetClear bool
+	TargetSearch       bool
 }
 
 // ============================================================
@@ -53,14 +63,30 @@ type SkillConfig struct {
 // ============================================================
 
 type BotController struct {
-	hwnd uintptr
+	hwnd           uintptr
+	lifecycleMu    sync.Mutex
+	stopGeneration uint64
 
 	mu     sync.Mutex
 	config BotConfig
 
-	stop    chan struct{}
-	wg      sync.WaitGroup
-	running bool
+	// inputMu is the single lane for game hotkeys. Target has its own timer
+	// goroutine while normal skills share a scheduler, so without this lock E
+	// could reach the game at exactly the same time as a skill (or two queued
+	// skills). Kathana can stop responding when that happens. Keeping the lock
+	// through the small cooldown makes every action wait for the preceding one.
+	inputMu     sync.Mutex
+	lastInputAt time.Time
+
+	stop                 chan struct{}
+	wg                   sync.WaitGroup
+	running              bool
+	skillScheduleUpdates chan []SkillConfig
+
+	cursorRecoveryMu      sync.Mutex
+	cursorAPIFailureCount int
+	cursorAPIFailureSince time.Time
+	cursorRecoveryUsed    bool
 
 	// chatPaused blocks every bot key while the player is writing in the game
 	// chat box. Timers keep advancing, so closing chat never causes a burst of
@@ -80,6 +106,20 @@ type BotController struct {
 	supportClearDispatchComplete bool
 }
 
+func (b *BotController) ClickMethodEnabled() bool {
+	if b == nil {
+		return false
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.config.ClickMode
+}
+
+// inputQueueSpacing gives independent timer loops a short input frame to finish
+// handling a hotkey. The shared input lane prevents overlapping window messages.
+const inputQueueSpacing = 80 * time.Millisecond
+const clickInputSpacing = 200 * time.Millisecond
+
 // ============================================================
 // Constructor
 // ============================================================
@@ -90,11 +130,12 @@ func NewBotController(
 ) *BotController {
 
 	return &BotController{
-		hwnd:              hwnd,
-		config:            config,
-		stop:              make(chan struct{}),
-		running:           false,
-		targetActionReady: true,
+		hwnd:                 hwnd,
+		config:               config,
+		stop:                 make(chan struct{}),
+		skillScheduleUpdates: make(chan []SkillConfig, 1),
+		running:              false,
+		targetActionReady:    true,
 	}
 }
 
@@ -222,6 +263,13 @@ func (b *BotController) canRunSkill(skill SkillConfig) bool {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
+	if b.config.ClickMode && b.config.ClickWhitelistMode {
+		if skill.TargetSearch {
+			return !b.targetActionReady
+		}
+		return b.targetActionReady
+	}
+
 	if skill.WaitForTargetClear && !b.targetPanelClear {
 		return false
 	}
@@ -250,6 +298,12 @@ func supportClearDispatchDrained(schedules []skillSchedule, queue []queuedCast, 
 // skills, so they cannot bypass an excluded target while OCR is checking it.
 func (b *BotController) TargetActionsReady() bool {
 	return b.areTargetActionsReady()
+}
+
+func (b *BotController) IsClickWhitelistMode() bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.config.ClickMode && b.config.ClickWhitelistMode
 }
 
 // TargetDelay exposes the active normal Target interval to the screen monitor.
@@ -284,6 +338,8 @@ func (b *BotController) TargetGeneration() uint64 {
 // ============================================================
 
 func (b *BotController) Start() {
+	b.lifecycleMu.Lock()
+	defer b.lifecycleMu.Unlock()
 
 	b.mu.Lock()
 
@@ -405,7 +461,8 @@ func (b *BotController) Start() {
 // Independent Loop
 // ============================================================
 //
-// Target / Attack / Pick are independent from skill scheduler.
+// Target / Attack / Pick have independent timers, but their actual key presses
+// still pass through the common input queue with every skill.
 //
 
 func (b *BotController) startIndependentLoop(
@@ -515,53 +572,16 @@ type queuedCast struct {
 func (b *BotController) startSkillScheduler(
 	skills []SkillConfig,
 ) {
-
-	schedules := make(
-		[]skillSchedule,
-		0,
-	)
-
-	now := time.Now()
-
-	order := 0
-
-	for _, skill := range skills {
-
-		if !skill.Enabled {
-			continue
-		}
-
-		if skill.Delay <= 0 {
-
-			fmt.Printf(
-				"[Bot] Skill %s ignored: invalid delay %v\n",
-				skill.Name,
-				skill.Delay,
-			)
-
-			continue
-		}
-
-		schedules = append(
-			schedules,
-			skillSchedule{
-				skill: skill,
-
-				// First cast immediately.
-				nextCast: now,
-
-				order: order,
-			},
-		)
-
-		order++
+	b.mu.Lock()
+	if b.skillScheduleUpdates == nil {
+		b.skillScheduleUpdates = make(chan []SkillConfig, 1)
 	}
-
+	updates := b.skillScheduleUpdates
+	clickMode := b.config.ClickMode
+	b.mu.Unlock()
+	schedules := makeSkillSchedules(skills, clickMode)
 	if len(schedules) == 0 {
-
 		fmt.Println("[Bot] No enabled skills.")
-
-		return
 	}
 
 	b.wg.Add(1)
@@ -572,10 +592,78 @@ func (b *BotController) startSkillScheduler(
 
 		b.runSkillScheduler(
 			schedules,
+			updates,
 		)
 
 	}()
 
+}
+
+func makeSkillSchedules(skills []SkillConfig, clickMode bool) []skillSchedule {
+	schedules := make([]skillSchedule, 0, len(skills))
+	initialSkillOffset := time.Duration(0)
+	if clickMode {
+		initialSkillOffset = clickInputSpacing
+	}
+	now := time.Now()
+	order := 0
+	for _, skill := range skills {
+		if !skill.Enabled {
+			continue
+		}
+		if skill.Delay <= 0 {
+			fmt.Printf("[Bot] Skill %s ignored: invalid delay %v\n", skill.Name, skill.Delay)
+			continue
+		}
+		schedules = append(schedules, skillSchedule{
+			skill: skill,
+			// In click mode, offset the initial casts so equal timers are
+			// delivered as a steady one-at-a-time stream instead of a burst.
+			nextCast: now.Add(time.Duration(order) * initialSkillOffset),
+			order:    order,
+		})
+		order++
+	}
+	return schedules
+}
+
+// UpdateSkills swaps the active scheduler list without stopping any runtime
+// workers. The scheduler drops pending casts for unchecked slots and starts
+// newly enabled slots on their normal staggered Click cadence.
+func (b *BotController) UpdateSkills(skills []SkillConfig) bool {
+	if b == nil {
+		return false
+	}
+	b.mu.Lock()
+	b.config.Skills = append([]SkillConfig(nil), skills...)
+	if !b.running {
+		b.mu.Unlock()
+		return false
+	}
+	if b.skillScheduleUpdates == nil {
+		b.skillScheduleUpdates = make(chan []SkillConfig, 1)
+	}
+	updates := b.skillScheduleUpdates
+	clickMode := b.config.ClickMode
+	b.mu.Unlock()
+
+	copySkills := append([]SkillConfig(nil), skills...)
+	select {
+	case updates <- copySkills:
+	default:
+		select {
+		case <-updates:
+		default:
+		}
+		select {
+		case updates <- copySkills:
+		default:
+		}
+	}
+	if clickMode {
+		appendOCRLog("CLICK SKILLS LIVE | %d enabled slot(s)", len(makeSkillSchedules(skills, true)))
+	}
+	return true
 }
 
 // ============================================================
@@ -584,6 +672,7 @@ func (b *BotController) startSkillScheduler(
 
 func (b *BotController) runSkillScheduler(
 	schedules []skillSchedule,
+	updates <-chan []SkillConfig,
 ) {
 
 	// Global queue.
@@ -604,6 +693,10 @@ func (b *BotController) runSkillScheduler(
 
 		case <-b.stop:
 			return
+		case skills := <-updates:
+			schedules = makeSkillSchedules(skills, b.ClickMethodEnabled())
+			queue = queue[:0]
+			continue
 
 		default:
 		}
@@ -770,8 +863,17 @@ func (b *BotController) runSkillScheduler(
 		sleepDuration :=
 			20 * time.Millisecond
 
-		earliest :=
-			schedules[0].nextCast
+		if len(schedules) == 0 {
+			select {
+			case <-b.stop:
+				return
+			case skills := <-updates:
+				schedules = makeSkillSchedules(skills, b.ClickMethodEnabled())
+			}
+			continue
+		}
+
+		earliest := schedules[0].nextCast
 
 		for i := 1; i < len(schedules); i++ {
 
@@ -814,6 +916,11 @@ func (b *BotController) runSkillScheduler(
 
 			timer.Stop()
 			return
+		case skills := <-updates:
+			timer.Stop()
+			schedules = makeSkillSchedules(skills, b.ClickMethodEnabled())
+			queue = queue[:0]
+			continue
 		}
 	}
 
@@ -824,11 +931,51 @@ func (b *BotController) runSkillScheduler(
 // ============================================================
 
 func (b *BotController) castSkill(skill SkillConfig) bool {
-	return b.castKeyWithTargetGate(
+	return b.castInputWithTargetGate(
 		"Skill "+skill.Name,
-		skill.VK,
-		skill.BypassTargetGate,
+		skill.BypassTargetGate || skill.TargetSearch,
+		func() bool {
+			if !b.canRunSkill(skill) {
+				return false
+			}
+			if skill.Click {
+				if !skill.ClickAreaSet {
+					fmt.Printf("[Bot] Skill %s -> FAILED click area is not set\n", skill.Name)
+					return false
+				}
+				if err := clickWindowClientPointReference(b.hwnd, skill.ClickX, skill.ClickY, skill.ClickReferenceWidth, skill.ClickReferenceHeight); err != nil {
+					b.observeVirtualClickResult(err)
+					fmt.Printf("[Bot] Skill %s -> FAILED click: %v\n", skill.Name, err)
+					appendOCRLog("VIRTUAL CLICK FAILED | Skill %s | Saved=%d,%d | Reference=%dx%d | %v", skill.Name, skill.ClickX, skill.ClickY, skill.ClickReferenceWidth, skill.ClickReferenceHeight, err)
+					return false
+				}
+				b.observeVirtualClickResult(nil)
+				return true
+			}
+			return pressKeyToWindow(b.hwnd, skill.VK)
+		},
 	)
+}
+
+func (b *BotController) CastEmergencySkill(skill WebEmergencySkillConfig) bool {
+	name := fmt.Sprintf("Emergency Skill %d", skill.Index)
+	return b.castInputWithTargetGate(name, true, func() bool {
+		if skill.Click {
+			if !skill.ClickAreaSet {
+				fmt.Printf("[Bot] %s -> FAILED click area is not set\n", name)
+				return false
+			}
+			if err := clickWindowClientPointReference(b.hwnd, skill.ClickX, skill.ClickY, skill.ClickReferenceWidth, skill.ClickReferenceHeight); err != nil {
+				b.observeVirtualClickResult(err)
+				fmt.Printf("[Bot] %s -> FAILED click: %v\n", name, err)
+				appendOCRLog("VIRTUAL CLICK FAILED | %s | Saved=%d,%d | Reference=%dx%d | %v", name, skill.ClickX, skill.ClickY, skill.ClickReferenceWidth, skill.ClickReferenceHeight, err)
+				return false
+			}
+			b.observeVirtualClickResult(nil)
+			return true
+		}
+		return pressKeyToWindow(b.hwnd, skill.VK)
+	})
 }
 
 func (b *BotController) castKey(
@@ -842,6 +989,16 @@ func (b *BotController) castKeyWithTargetGate(
 	name string,
 	vk uintptr,
 	bypassTargetGate bool,
+) bool {
+	return b.castInputWithTargetGate(name, bypassTargetGate, func() bool {
+		return pressKeyToWindow(b.hwnd, vk)
+	})
+}
+
+func (b *BotController) castInputWithTargetGate(
+	name string,
+	bypassTargetGate bool,
+	sendInput func() bool,
 ) bool {
 	// Screen monitors (Target Until Dead and target validation) can request a
 	// target key outside the regular scheduler. Never let those requests send
@@ -857,21 +1014,47 @@ func (b *BotController) castKeyWithTargetGate(
 		return false
 	}
 
-	sent :=
-		pressKeyToWindow(
-			b.hwnd,
-			vk,
-		)
+	// E and skills are scheduled by different goroutines. Serialize the final
+	// key delivery here (rather than only in the skill scheduler) so Target
+	// Until Dead and any future caller use the same queue as well.
+	b.inputMu.Lock()
+	defer b.inputMu.Unlock()
+
+	if !b.lastInputAt.IsZero() {
+		wait := b.minimumInputSpacing(name) - time.Since(b.lastInputAt)
+		if wait > 0 {
+			timer := time.NewTimer(wait)
+			select {
+			case <-timer.C:
+			case <-b.stop:
+				timer.Stop()
+				return false
+			}
+		}
+	}
+
+	// State may have changed while this action waited behind another hotkey.
+	// Recheck it so a Skill does not sneak past an E that just began target-name
+	// validation, and so Stop/Chat Pause cancels pending deliveries.
+	if !b.IsRunning() || b.IsChatPaused() {
+		return false
+	}
+	if (strings.HasPrefix(name, "Skill ") || name == "Attack") && !bypassTargetGate && !b.areTargetActionsReady() {
+		return false
+	}
+
+	sent := sendInput()
 
 	if !sent {
 
 		fmt.Printf(
-			"[Bot] %-12s -> FAILED key 0x%X\n",
+			"[Bot] %-12s -> FAILED input\n",
 			name,
-			vk,
 		)
 		return false
 	}
+
+	b.lastInputAt = time.Now()
 
 	if name == "Target" {
 		b.holdTargetActionsAfterTarget()
@@ -883,7 +1066,20 @@ func (b *BotController) castKeyWithTargetGate(
 // CastTarget is used by the target-until-dead monitor. Keeping it here means
 // the press follows the same chat guard as every other bot action.
 func (b *BotController) CastTarget() bool {
+	if !b.IsRunning() || b.IsChatPaused() {
+		return false
+	}
 	return b.castKey("Target", 0x45)
+}
+
+func (b *BotController) minimumInputSpacing(name string) time.Duration {
+	b.mu.Lock()
+	clickMode := b.config.ClickMode
+	b.mu.Unlock()
+	if clickMode && (strings.HasPrefix(name, "Skill ") || strings.HasPrefix(name, "Emergency Skill ")) {
+		return clickInputSpacing
+	}
+	return inputQueueSpacing
 }
 
 // ============================================================
@@ -891,6 +1087,19 @@ func (b *BotController) CastTarget() bool {
 // ============================================================
 
 func (b *BotController) Stop() {
+	_ = b.stopBot(true)
+}
+
+func (b *BotController) stopForRecovery() bool {
+	return b.stopBot(false)
+}
+
+func (b *BotController) stopBot(userRequested bool) bool {
+	b.lifecycleMu.Lock()
+	defer b.lifecycleMu.Unlock()
+	if userRequested {
+		b.stopGeneration++
+	}
 
 	b.mu.Lock()
 
@@ -898,7 +1107,7 @@ func (b *BotController) Stop() {
 
 		b.mu.Unlock()
 
-		return
+		return false
 	}
 
 	// Mark stopped FIRST.
@@ -927,6 +1136,69 @@ func (b *BotController) Stop() {
 	fmt.Println("----------------------------------------")
 	fmt.Println("[Bot] STOPPED")
 	fmt.Println("----------------------------------------")
+	return true
+}
+
+func (b *BotController) observeVirtualClickResult(err error) {
+	b.cursorRecoveryMu.Lock()
+	if err == nil {
+		b.cursorAPIFailureCount = 0
+		b.cursorAPIFailureSince = time.Time{}
+		b.cursorRecoveryUsed = false
+		b.cursorRecoveryMu.Unlock()
+		return
+	}
+	if !errors.Is(err, errCursorAPI) {
+		b.cursorAPIFailureCount = 0
+		b.cursorAPIFailureSince = time.Time{}
+		b.cursorRecoveryMu.Unlock()
+		return
+	}
+	now := time.Now()
+	if b.cursorAPIFailureSince.IsZero() || now.Sub(b.cursorAPIFailureSince) > 20*time.Second {
+		b.cursorAPIFailureSince = now
+		b.cursorAPIFailureCount = 0
+	}
+	b.cursorAPIFailureCount++
+	shouldRecover := b.cursorAPIFailureCount >= 3 && !b.cursorRecoveryUsed
+	if shouldRecover {
+		b.cursorRecoveryUsed = true
+	}
+	failureCount := b.cursorAPIFailureCount
+	b.cursorRecoveryMu.Unlock()
+
+	if !shouldRecover {
+		return
+	}
+	appendOCRLog("BOT RECOVERY | %d cursor API failures within 20s; restarting bot once", failureCount)
+	fmt.Printf("[Bot] Cursor API failed %d times; restarting bot once.\n", failureCount)
+	go func() {
+		if !b.IsRunning() {
+			appendOCRLog("BOT RECOVERY | skipped because bot was already stopped")
+			return
+		}
+		if !b.stopForRecovery() {
+			appendOCRLog("BOT RECOVERY | skipped because bot was stopped before recovery began")
+			return
+		}
+		b.lifecycleMu.Lock()
+		stopGeneration := b.stopGeneration
+		b.lifecycleMu.Unlock()
+		time.Sleep(1500 * time.Millisecond)
+		b.lifecycleMu.Lock()
+		cancelled := b.running || b.stopGeneration != stopGeneration
+		b.lifecycleMu.Unlock()
+		if cancelled {
+			// A user or another workflow restarted it during the recovery delay.
+			return
+		}
+		b.Start()
+		if b.IsRunning() {
+			appendOCRLog("BOT RECOVERY | bot restarted; persistent cursor access errors will not trigger a restart loop")
+		} else {
+			appendOCRLog("BOT RECOVERY | restart requested but bot did not start (disabled or already stopped)")
+		}
+	}()
 }
 
 // ============================================================

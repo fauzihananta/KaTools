@@ -1,0 +1,244 @@
+{
+  "hwnd": "",
+  "autoAcceptEnabled": true,
+  "autoPauseDeathEnabled": false,
+  "autoResurrectEnabled": false,
+  "assistSkillVK": 0,
+  "assistSkillDelay": 1,
+  "targetUntilDeadEnabled": false,
+  "targetUntilDeadSupport": false,
+  "targetUntilDeadCharacterName": "",
+  "targetNameFilterMode": "skip",
+  "clickWhitelistMode": false,
+  "clickWhitelistTargetNames": "",
+  "chatTextClickEnabled": true,
+  "chatTextClickKeyword": "party bro",
+  "chatTextClickYOffset": 180,
+  "targetEnabled": false,
+  "inputMethod": "click",
+  "targetWithClick": true,
+  "targetWithoutName": false,
+  "targetDelay": 0,
+  "attackEnabled": false,
+  "attackDelay": 0,
+  "pickEnabled": false,
+  "pickDelay": 0,
+  "autoPotHPEnabled": true,
+  "autoPotHPPercent": 70,
+  "autoPotHPSlotVK": 49,
+  "autoPotTPEnabled": false,
+  "autoPotTPPercent": 0,
+  "autoPotTPSlotVK": 49,
+  "emergencySkills": [
+    {
+      "index": 1,
+      "enabled": false,
+      "vk": 49,
+      "needsTarget": false
+    },
+    {
+      "index": 2,
+      "enabled": false,
+      "vk": 49,
+      "needsTarget": false
+    },
+    {
+      "index": 3,
+      "enabled": false,
+      "vk": 49,
+      "needsTarget": false
+    },
+    {
+      "index": 4,
+      "enabled": false,
+      "vk": 49,
+      "needsTarget": false
+    },
+    {
+      "index": 5,
+      "enabled": false,
+      "vk": 49,
+      "needsTarget": false
+    }
+  ],
+  "assistPanicTarget": false,
+  "skills": [
+    {
+      "name": "1",
+      "vk": 49,
+      "enabled": false,
+      "delay": 0,
+      "targetSearch": false
+    },
+    {
+      "name": "2",
+      "vk": 50,
+      "enabled": false,
+      "delay": 0,
+      "targetSearch": false
+    },
+    {
+      "name": "3",
+      "vk": 51,
+      "enabled": false,
+      "delay": 0,
+      "targetSearch": false
+    },
+    {
+      "name": "4",
+      "vk": 52,
+      "enabled": false,
+      "delay": 0,
+      "targetSearch": false
+    },
+    {
+      "name": "5",
+      "vk": 53,
+      "enabled": false,
+      "delay": 0,
+      "targetSearch": false
+    },
+    {
+      "name": "6",
+      "vk": 54,
+      "enabled": false,
+      "delay": 0,
+      "targetSearch": false
+    },
+    {
+      "name": "7",
+      "vk": 55,
+      "enabled": false,
+      "delay": 0,
+      "targetSearch": false
+    },
+    {
+      "name": "8",
+      "vk": 56,
+      "enabled": false,
+      "delay": 0,
+      "targetSearch": false
+    },
+    {
+      "name": "9",
+      "vk": 57,
+      "enabled": false,
+      "delay": 0,
+      "targetSearch": false
+    },
+    {
+      "name": "0",
+      "vk": 48,
+      "enabled": false,
+      "delay": 0,
+      "targetSearch": false
+    },
+    {
+      "name": "F1",
+      "vk": 112,
+      "enabled": false,
+      "delay": 301,
+      "targetSearch": false
+    },
+    {
+      "name": "F2",
+      "vk": 113,
+      "enabled": false,
+      "delay": 0,
+      "targetSearch": false
+    },
+    {
+      "name": "F3",
+      "vk": 114,
+      "enabled": false,
+      "delay": 0,
+      "targetSearch": false
+    },
+    {
+      "name": "F4",
+      "vk": 115,
+      "enabled": false,
+      "delay": 0,
+      "targetSearch": false
+    },
+    {
+      "name": "F5",
+      "vk": 116,
+      "enabled": false,
+      "delay": 0,
+      "targetSearch": false
+    },
+    {
+      "name": "F6",
+      "vk": 117,
+      "enabled": false,
+      "delay": 0,
+      "targetSearch": false
+    },
+    {
+      "name": "F7",
+      "vk": 118,
+      "enabled": false,
+      "delay": 0,
+      "targetSearch": false
+    },
+    {
+      "name": "F8",
+      "vk": 119,
+      "enabled": false,
+      "delay": 0,
+      "targetSearch": false
+    },
+    {
+      "name": "F9",
+      "vk": 120,
+      "enabled": false,
+      "delay": 0,
+      "targetSearch": false
+    },
+    {
+      "name": "F10",
+      "vk": 121,
+      "enabled": false,
+      "delay": 0,
+      "targetSearch": false
+    }
+  ],
+  "supportSkills": [
+    {
+      "name": "1",
+      "vk": 49,
+      "enabled": false,
+      "delay": 0,
+      "withTarget": false
+    },
+    {
+      "name": "2",
+      "vk": 50,
+      "enabled": false,
+      "delay": 0,
+      "withTarget": false
+    },
+    {
+      "name": "3",
+      "vk": 51,
+      "enabled": false,
+      "delay": 0,
+      "withTarget": false
+    },
+    {
+      "name": "4",
+      "vk": 52,
+      "enabled": false,
+      "delay": 0,
+      "withTarget": false
+    },
+    {
+      "name": "5",
+      "vk": 53,
+      "enabled": false,
+      "delay": 0,
+      "withTarget": false
+    }
+  ]
+}
