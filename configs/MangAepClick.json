@@ -9,11 +9,11 @@
   "targetUntilDeadSupport": false,
   "targetUntilDeadCharacterName": "",
   "targetNameFilterMode": "skip",
-  "clickWhitelistMode": false,
-  "clickWhitelistTargetNames": "",
-  "chatTextClickEnabled": true,
+  "clickWhitelistMode": true,
+  "clickWhitelistTargetNames": "Choniokusin",
+  "chatTextClickEnabled": false,
   "chatTextClickKeyword": "party bro",
-  "chatTextClickYOffset": 180,
+  "chatTextClickYOffset": 100,
   "targetEnabled": false,
   "inputMethod": "click",
   "targetWithClick": true,
@@ -32,7 +32,7 @@
   "emergencySkills": [
     {
       "index": 1,
-      "enabled": false,
+      "enabled": true,
       "vk": 49,
       "needsTarget": false
     },
@@ -73,15 +73,15 @@
     {
       "name": "2",
       "vk": 50,
-      "enabled": false,
-      "delay": 0,
+      "enabled": true,
+      "delay": 6,
       "targetSearch": false
     },
     {
       "name": "3",
       "vk": 51,
-      "enabled": false,
-      "delay": 0,
+      "enabled": true,
+      "delay": 8,
       "targetSearch": false
     },
     {
@@ -94,36 +94,36 @@
     {
       "name": "5",
       "vk": 53,
-      "enabled": false,
-      "delay": 0,
+      "enabled": true,
+      "delay": 185,
       "targetSearch": false
     },
     {
       "name": "6",
       "vk": 54,
       "enabled": false,
-      "delay": 0,
+      "delay": 181,
       "targetSearch": false
     },
     {
       "name": "7",
       "vk": 55,
       "enabled": false,
-      "delay": 0,
+      "delay": 182,
       "targetSearch": false
     },
     {
       "name": "8",
       "vk": 56,
-      "enabled": false,
-      "delay": 0,
+      "enabled": true,
+      "delay": 181,
       "targetSearch": false
     },
     {
       "name": "9",
       "vk": 57,
-      "enabled": false,
-      "delay": 0,
+      "enabled": true,
+      "delay": 182,
       "targetSearch": false
     },
     {

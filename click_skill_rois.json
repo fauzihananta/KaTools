@@ -1,4 +1,58 @@
 {
+  "1": {
+    "x": 1220,
+    "y": 1196,
+    "width": 1,
+    "height": 1,
+    "selected": true,
+    "clientWidth": 1920,
+    "clientHeight": 1440
+  },
+  "2": {
+    "x": 1269,
+    "y": 1193,
+    "width": 1,
+    "height": 1,
+    "selected": true,
+    "clientWidth": 1920,
+    "clientHeight": 1440
+  },
+  "3": {
+    "x": 1316,
+    "y": 1195,
+    "width": 1,
+    "height": 1,
+    "selected": true,
+    "clientWidth": 1920,
+    "clientHeight": 1440
+  },
+  "5": {
+    "x": 1417,
+    "y": 1197,
+    "width": 1,
+    "height": 1,
+    "selected": true,
+    "clientWidth": 1920,
+    "clientHeight": 1440
+  },
+  "8": {
+    "x": 1560,
+    "y": 1196,
+    "width": 1,
+    "height": 1,
+    "selected": true,
+    "clientWidth": 1920,
+    "clientHeight": 1440
+  },
+  "9": {
+    "x": 1610,
+    "y": 1198,
+    "width": 1,
+    "height": 1,
+    "selected": true,
+    "clientWidth": 1920,
+    "clientHeight": 1440
+  },
   "AutoAccept": {
     "x": 936,
     "y": 768,
@@ -36,8 +90,35 @@
     "clientHeight": 1440
   },
   "Emergency1": {
-    "x": 1494,
-    "y": 1202,
+    "x": 1492,
+    "y": 1197,
+    "width": 1,
+    "height": 1,
+    "selected": true,
+    "clientWidth": 1920,
+    "clientHeight": 1440
+  },
+  "F3": {
+    "x": 1365,
+    "y": 1295,
+    "width": 1,
+    "height": 1,
+    "selected": true,
+    "clientWidth": 1920,
+    "clientHeight": 1440
+  },
+  "F6": {
+    "x": 1315,
+    "y": 1194,
+    "width": 1,
+    "height": 1,
+    "selected": true,
+    "clientWidth": 1920,
+    "clientHeight": 1440
+  },
+  "F9": {
+    "x": 1612,
+    "y": 1247,
     "width": 1,
     "height": 1,
     "selected": true,
@@ -45,8 +126,8 @@
     "clientHeight": 1440
   },
   "HP": {
-    "x": 1253,
-    "y": 1248,
+    "x": 1270,
+    "y": 1247,
     "width": 1,
     "height": 1,
     "selected": true,

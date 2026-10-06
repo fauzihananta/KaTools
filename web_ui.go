@@ -1248,9 +1248,9 @@ body.click-input-mode #deathROIPreview {
 
 	<div class="section" id="normalNumberSkillsSection">
 
-		<h2>Skills — Number</h2>
+		<h2>Skills</h2>
 
-		<div class="hint" id="skillInputHint">Check the skills to run and enter each interval in seconds. Click mode supports slots 1–0 and F1–F10.</div>
+		<div class="hint" id="skillInputHint">Slots 1–0. Buff Skills on F1–F10 always have priority during timing clashes.</div>
 		<div class="hint" id="skillLiveApplyStatus" role="status" aria-live="polite"></div>
 		<div class="skills-grid">
 
@@ -1301,7 +1301,9 @@ body.click-input-mode #deathROIPreview {
 
 	<div class="section" id="normalFunctionSkillsSection">
 
-		<h2>Skills — Function</h2>
+		<h2>Buff Skills</h2>
+
+		<div class="hint">Pre-fires ~300ms early and always wins timing clashes against slots 1–0.</div>
 
 		<div class="skills-grid">
 
@@ -4947,6 +4949,9 @@ func applyWebBotConfig(
 	)
 
 	autoPot.Update(cfg)
+	autoPot.SetClickSender(func(hwnd uintptr, x, y, refW, refH int) bool {
+		return bot.CastClickAction("AutoPot", hwnd, x, y, refW, refH)
+	})
 	emergency.SetInputSender(bot.CastEmergencySkill)
 	clickAreas := LoadClickSkillROIs()
 	for index := range cfg.EmergencySkills {

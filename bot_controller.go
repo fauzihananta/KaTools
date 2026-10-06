@@ -6,8 +6,26 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
+	"unsafe"
+
+	"KaTools/cursor_hook"
+
+	"golang.org/x/sys/windows"
 )
+
+// getWindowPID returns the process ID for the given window handle.
+func getWindowPID(hwnd uintptr) (uint32, error) {
+	user32 := windows.NewLazyDLL("user32.dll")
+	proc := user32.NewProc("GetWindowThreadProcessId")
+	var pid uint32
+	ret, _, _ := proc.Call(hwnd, uintptr(unsafe.Pointer(&pid)))
+	if ret == 0 {
+		return 0, fmt.Errorf("GetWindowThreadProcessId returned 0 for HWND %x", hwnd)
+	}
+	return pid, nil
+}
 
 // ============================================================
 // Bot Config
@@ -56,6 +74,7 @@ type SkillConfig struct {
 	BypassTargetGate   bool
 	WaitForTargetClear bool
 	TargetSearch       bool
+	IsBuff             bool
 }
 
 // ============================================================
@@ -64,6 +83,7 @@ type SkillConfig struct {
 
 type BotController struct {
 	hwnd           uintptr
+	cursorHookCtrl *cursor_hook.Controller
 	lifecycleMu    sync.Mutex
 	stopGeneration uint64
 
@@ -75,8 +95,9 @@ type BotController struct {
 	// could reach the game at exactly the same time as a skill (or two queued
 	// skills). Kathana can stop responding when that happens. Keeping the lock
 	// through the small cooldown makes every action wait for the preceding one.
-	inputMu     sync.Mutex
-	lastInputAt time.Time
+	inputMu           sync.Mutex
+	lastInputAt       time.Time
+	emergencyPending  int32 // atomic; emergency skill wants to fire, break spacing wait
 
 	stop                 chan struct{}
 	wg                   sync.WaitGroup
@@ -615,8 +636,11 @@ func makeSkillSchedules(skills []SkillConfig, clickMode bool) []skillSchedule {
 			fmt.Printf("[Bot] Skill %s ignored: invalid delay %v\n", skill.Name, skill.Delay)
 			continue
 		}
+		derived := skill
+		// F1–F10 use VK 0x70–0x79; slots 1–0 use VK 0x30–0x39.
+		derived.IsBuff = derived.VK >= 0x70 && derived.VK <= 0x79
 		schedules = append(schedules, skillSchedule{
-			skill: skill,
+			skill: derived,
 			// In click mode, offset the initial casts so equal timers are
 			// delivered as a steady one-at-a-time stream instead of a burst.
 			nextCast: now.Add(time.Duration(order) * initialSkillOffset),
@@ -670,6 +694,8 @@ func (b *BotController) UpdateSkills(skills []SkillConfig) bool {
 // Skill Scheduler
 // ============================================================
 
+const buffPreFire = 300 * time.Millisecond
+
 func (b *BotController) runSkillScheduler(
 	schedules []skillSchedule,
 	updates <-chan []SkillConfig,
@@ -704,14 +730,23 @@ func (b *BotController) runSkillScheduler(
 		now := time.Now()
 
 		// ----------------------------------------------------
-		// Find skills whose timer has expired.
+		// Find skills whose timer has expired (or within pre-fire
+		// window for buff skills).
 		// ----------------------------------------------------
 
 		for i := range schedules {
 
 			schedule := &schedules[i]
 
-			if !now.Before(schedule.nextCast) {
+			// Buff skills pre-fire 300ms early to compensate for their
+			// longer casting time and to win timing clashes with attack
+			// skills.
+			preFireTime := schedule.nextCast
+			if schedule.skill.IsBuff {
+				preFireTime = schedule.nextCast.Add(-buffPreFire)
+			}
+
+			if !now.Before(preFireTime) {
 				// Do not advance this individual timer while its target rule
 				// prevents a cast. When the rule clears, one due cast is sent;
 				// missed intervals are coalesced rather than queued as a burst.
@@ -719,6 +754,9 @@ func (b *BotController) runSkillScheduler(
 					continue
 				}
 
+				// Use original nextCast as dueAt (not preFireTime) so the
+				// sort reflects the real schedule, and so the next pre-fire
+				// calculation is based on the correct anchor.
 				queue = append(
 					queue,
 					queuedCast{
@@ -764,10 +802,9 @@ func (b *BotController) runSkillScheduler(
 		// ----------------------------------------------------
 		// Sort queue.
 		//
-		// Earliest scheduled skill first.
-		//
-		// If same time:
-		// original UI/config order wins.
+		// Buff skills always execute before attack skills at the
+		// same scheduled time. Within each group, earliest time
+		// wins; ties are broken by original UI/config order.
 		// ----------------------------------------------------
 
 		if len(queue) > 1 {
@@ -775,6 +812,11 @@ func (b *BotController) runSkillScheduler(
 			sort.SliceStable(
 				queue,
 				func(i, j int) bool {
+
+					// Buffs always win over attacks.
+					if queue[i].skill.IsBuff != queue[j].skill.IsBuff {
+						return queue[i].skill.IsBuff
+					}
 
 					if queue[i].dueAt.Equal(
 						queue[j].dueAt,
@@ -959,6 +1001,11 @@ func (b *BotController) castSkill(skill SkillConfig) bool {
 
 func (b *BotController) CastEmergencySkill(skill WebEmergencySkillConfig) bool {
 	name := fmt.Sprintf("Emergency Skill %d", skill.Index)
+	// Signal that an emergency wants to fire immediately. This interrupts any
+	// regular skill that is mid-spacing-wait so the emergency click is not
+	// delayed by attack skills saturating the input channel.
+	atomic.StoreInt32(&b.emergencyPending, 1)
+	defer atomic.StoreInt32(&b.emergencyPending, 0)
 	return b.castInputWithTargetGate(name, true, func() bool {
 		if skill.Click {
 			if !skill.ClickAreaSet {
@@ -976,6 +1023,130 @@ func (b *BotController) CastEmergencySkill(skill WebEmergencySkillConfig) bool {
 		}
 		return pressKeyToWindow(b.hwnd, skill.VK)
 	})
+}
+
+// CastClickAction handles AutoAccept, AutoResu, and DCOk clicks through the
+// same input channel as skills so they don't race with skill clicks. These
+// are critical survival actions and get emergency-level priority.
+func (b *BotController) CastClickAction(name string, hwnd uintptr, x, y, refW, refH int) bool {
+	if !b.IsRunning() || b.IsChatPaused() {
+		return false
+	}
+
+	// Same atomic signaling as CastEmergencySkill: regular skills mid-spacing-wait
+	// will detect this and abort so the critical click fires immediately.
+	atomic.StoreInt32(&b.emergencyPending, 1)
+	defer atomic.StoreInt32(&b.emergencyPending, 0)
+
+	b.inputMu.Lock()
+
+	if !b.lastInputAt.IsZero() {
+		wait := clickInputSpacing - time.Since(b.lastInputAt)
+		if wait > 0 {
+			timer := time.NewTimer(wait)
+			timer.Stop()
+			for time.Since(b.lastInputAt) < clickInputSpacing {
+				b.inputMu.Unlock()
+				select {
+				case <-time.After(10 * time.Millisecond):
+				case <-b.stop:
+					return false
+				}
+				if atomic.LoadInt32(&b.emergencyPending) != 0 {
+					return false
+				}
+				b.inputMu.Lock()
+				if !b.IsRunning() || b.IsChatPaused() {
+					return false
+				}
+			}
+		}
+	}
+
+	b.inputMu.Unlock()
+
+	if !b.IsRunning() || b.IsChatPaused() {
+		return false
+	}
+
+	b.inputMu.Lock()
+	defer b.inputMu.Unlock()
+
+	err := clickWindowClientPointReference(hwnd, x, y, refW, refH)
+	if err != nil {
+		b.observeVirtualClickResult(err)
+		appendOCRLog("VIRTUAL CLICK FAILED | %s | Saved=%d,%d | Reference=%dx%d | %v", name, x, y, refW, refH, err)
+		return false
+	}
+	b.observeVirtualClickResult(nil)
+	b.lastInputAt = time.Now()
+	return true
+}
+
+// CastClickAction2 sends two sequential clicks through the same input channel as
+// skills. Used by ChatParty which clicks the party button first, then the
+// character name/position. Both clicks are atomic — if the first fails the second
+// is skipped.
+func (b *BotController) CastClickAction2(hwnd uintptr, x1, y1, refW1, refH1, x2, y2, refW2, refH2 int) bool {
+	if !b.IsRunning() || b.IsChatPaused() {
+		return false
+	}
+
+	atomic.StoreInt32(&b.emergencyPending, 1)
+	defer atomic.StoreInt32(&b.emergencyPending, 0)
+
+	b.inputMu.Lock()
+
+	if !b.lastInputAt.IsZero() {
+		wait := clickInputSpacing - time.Since(b.lastInputAt)
+		if wait > 0 {
+			timer := time.NewTimer(wait)
+			timer.Stop()
+			for time.Since(b.lastInputAt) < clickInputSpacing {
+				b.inputMu.Unlock()
+				select {
+				case <-time.After(10 * time.Millisecond):
+				case <-b.stop:
+					return false
+				}
+				if atomic.LoadInt32(&b.emergencyPending) != 0 {
+					return false
+				}
+				b.inputMu.Lock()
+				if !b.IsRunning() || b.IsChatPaused() {
+					return false
+				}
+			}
+		}
+	}
+
+	b.inputMu.Unlock()
+
+	if !b.IsRunning() || b.IsChatPaused() {
+		return false
+	}
+
+	b.inputMu.Lock()
+	defer b.inputMu.Unlock()
+
+	err := clickWindowClientPointReference(hwnd, x1, y1, refW1, refH1)
+	if err != nil {
+		b.observeVirtualClickResult(err)
+		appendOCRLog("CHAT PARTY CLICK FAILED | Saved=%d,%d | Reference=%dx%d | %v", x1, y1, refW1, refH1, err)
+		return false
+	}
+	b.observeVirtualClickResult(nil)
+	time.Sleep(150 * time.Millisecond)
+
+	err = clickWindowClientPointReference(hwnd, x2, y2, refW2, refH2)
+	if err != nil {
+		b.observeVirtualClickResult(err)
+		appendOCRLog("CHAT CHARACTER CLICK FAILED | Saved=%d,%d | Reference=%dx%d | %v", x2, y2, refW2, refH2, err)
+		return false
+	}
+	b.observeVirtualClickResult(nil)
+	b.lastInputAt = time.Now()
+	return true
 }
 
 func (b *BotController) castKey(
@@ -1017,21 +1188,36 @@ func (b *BotController) castInputWithTargetGate(
 	// E and skills are scheduled by different goroutines. Serialize the final
 	// key delivery here (rather than only in the skill scheduler) so Target
 	// Until Dead and any future caller use the same queue as well.
+
 	b.inputMu.Lock()
-	defer b.inputMu.Unlock()
 
 	if !b.lastInputAt.IsZero() {
 		wait := b.minimumInputSpacing(name) - time.Since(b.lastInputAt)
 		if wait > 0 {
 			timer := time.NewTimer(wait)
-			select {
-			case <-timer.C:
-			case <-b.stop:
-				timer.Stop()
-				return false
+			timer.Stop()
+			// Emergency skills interrupt the spacing wait so they can fire
+			// immediately even when attack skills are saturating the input channel.
+			for time.Since(b.lastInputAt) < b.minimumInputSpacing(name) {
+				b.inputMu.Unlock()
+				select {
+				case <-time.After(10 * time.Millisecond):
+				case <-b.stop:
+					return false
+				}
+				if atomic.LoadInt32(&b.emergencyPending) != 0 {
+					return false
+				}
+				b.inputMu.Lock()
+				// Re-check after re-acquiring: state or running may have changed
+				if !b.IsRunning() || b.IsChatPaused() {
+					return false
+				}
 			}
 		}
 	}
+
+	b.inputMu.Unlock()
 
 	// State may have changed while this action waited behind another hotkey.
 	// Recheck it so a Skill does not sneak past an E that just began target-name
@@ -1042,6 +1228,9 @@ func (b *BotController) castInputWithTargetGate(
 	if (strings.HasPrefix(name, "Skill ") || name == "Attack") && !bypassTargetGate && !b.areTargetActionsReady() {
 		return false
 	}
+
+	b.inputMu.Lock()
+	defer b.inputMu.Unlock()
 
 	sent := sendInput()
 

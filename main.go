@@ -147,6 +147,8 @@ func main() {
 
 	runtimeManager := NewRuntimeManager()
 	globalRuntimeManager = runtimeManager
+	SetHotkeyRuntimeManager(runtimeManager)
+	RunHotkeyServer()
 	setupShutdown(runtimeManager)
 	// Existing saved areas are implementation details, not regular user files.
 	// New areas are hidden again immediately after the picker saves them.
@@ -205,6 +207,9 @@ type RuntimeManager struct {
 	running  bool
 	starting bool
 
+	lastHwnd uintptr
+	lastConfig WebBotConfig
+
 	stopCh chan struct{}
 	doneCh chan struct{}
 }
@@ -260,6 +265,8 @@ func (m *RuntimeManager) Start(
 	}
 
 	m.starting = true
+	m.lastConfig = cfg
+	m.lastHwnd = hwnd
 
 	m.mu.Unlock()
 
@@ -933,6 +940,30 @@ func (m *RuntimeManager) IsRunning() bool {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.running
+}
+
+// HotkeyStart restarts the bot using the last known config and target window.
+// Used by the Alt+Home global hotkey.
+func (m *RuntimeManager) HotkeyStart() {
+	m.mu.RLock()
+	cfg := m.lastConfig
+	hwnd := m.lastHwnd
+	m.mu.RUnlock()
+
+	if hwnd == 0 {
+		return
+	}
+	// Re-validate the window still exists
+	if !isWindowValid(hwnd) {
+		return
+	}
+	// Already running — ignore
+	if m.IsRunning() {
+		return
+	}
+	// Use a fresh config copy so concurrent updates don't race
+	copyCfg := cfg
+	_ = m.Start(hwnd, copyCfg)
 }
 
 // ============================================================
@@ -1990,27 +2021,25 @@ func runPicker(
 				}
 				chatTextClickBusy = true
 				go func(event chatTextEvent, keyword string, partyArea ClickSkillROI) {
-					if err := clickWindowClientPointReference(uintptr(hwnd), partyArea.X+partyArea.Width/2, partyArea.Y+partyArea.Height/2, partyArea.ClientWidth, partyArea.ClientHeight); err != nil {
-						appendOCRLog("CHAT PARTY CLICK FAILED | Keyword=%q | %v", keyword, err)
+					ok := bot.CastClickAction2(
+						uintptr(hwnd),
+						partyArea.X+partyArea.Width/2, partyArea.Y+partyArea.Height/2, partyArea.ClientWidth, partyArea.ClientHeight,
+						event.clientX, event.clientY, event.referenceWidth, event.referenceHeight,
+					)
+					if !ok {
 						select {
 						case chatTextClickDoneCh <- false:
 						case <-stopCh:
 						}
 						return
 					}
-					time.Sleep(150 * time.Millisecond)
-					secondClickErr := clickWindowClientPointReference(uintptr(hwnd), event.clientX, event.clientY, event.referenceWidth, event.referenceHeight)
-					if secondClickErr != nil {
-						appendOCRLog("CHAT CHARACTER CLICK FAILED | Keyword=%q | Point=%d,%d | %v", keyword, event.clientX, event.clientY, secondClickErr)
-					} else {
-						anchorText := "bubble"
-						if event.match.FollowingLine != nil {
-							anchorText = event.match.FollowingLine.Text
-						}
-						appendOCRLog("CHAT TEXT FLOW | Keyword=%q | Match=%q | Anchor=%q | PartyPoint=%d,%d | CharacterPoint=%d,%d | YOffset=%d | Confidence=%.1f", keyword, event.match.Text, anchorText, partyArea.X+partyArea.Width/2, partyArea.Y+partyArea.Height/2, event.clientX, event.clientY, event.yOffset, event.match.Confidence)
+					anchorText := "bubble"
+					if event.match.FollowingLine != nil {
+						anchorText = event.match.FollowingLine.Text
 					}
+					appendOCRLog("CHAT TEXT FLOW | Keyword=%q | Match=%q | Anchor=%q | PartyPoint=%d,%d | CharacterPoint=%d,%d | YOffset=%d | Confidence=%.1f", keyword, event.match.Text, anchorText, partyArea.X+partyArea.Width/2, partyArea.Y+partyArea.Height/2, event.clientX, event.clientY, event.yOffset, event.match.Confidence)
 					select {
-					case chatTextClickDoneCh <- (secondClickErr == nil):
+					case chatTextClickDoneCh <- true:
 					case <-stopCh:
 					}
 				}(event, keyword, partyArea)
@@ -2244,18 +2273,18 @@ func runPicker(
 				bot.Stop()
 				sent := false
 				method := "Enter"
-				var inputErr error
 				if bot.ClickMethodEnabled() {
 					method = "click"
-					sent, inputErr = clickConfiguredAction(uintptr(hwnd), "DCOk")
+					if area, ok := LoadClickSkillROIs()["DCOk"]; ok && area.Selected {
+						sent = bot.CastClickAction("DCOk", uintptr(hwnd), area.X+area.Width/2, area.Y+area.Height/2, area.ClientWidth, area.ClientHeight)
+					}
 				} else {
 					sent = pressEnterToWindow(uintptr(hwnd))
 				}
 				appendOCRLog(
-					"DC DETECTED | Connection failed confirmed | Input=%s sent=%t error=%v | Stopping KaTools runtime | Text=%q",
+					"DC DETECTED | Connection failed confirmed | Input=%s sent=%t | Stopping KaTools runtime | Text=%q",
 					method,
 					sent,
-					inputErr,
 					oCRTextForLog(event.text),
 				)
 				if onRuntimeStop != nil {
@@ -2297,17 +2326,18 @@ func runPicker(
 				deathPause.ObserveResurrectionPrompt(true) {
 				sent := false
 				method := "Enter"
-				var inputErr error
 				if bot.ClickMethodEnabled() {
 					method = "click"
-					sent, inputErr = clickConfiguredAction(uintptr(hwnd), "AutoResu")
+					if area, ok := LoadClickSkillROIs()["AutoResu"]; ok && area.Selected {
+						sent = bot.CastClickAction("AutoResu", uintptr(hwnd), area.X+area.Width/2, area.Y+area.Height/2, area.ClientWidth, area.ClientHeight)
+					}
 				} else {
 					sent = pressEnterToWindow(uintptr(hwnd))
 				}
 				if sent && deathPause.MarkResurrectionAccepted() {
 					appendOCRLog("AUTO RESU | Resurrection prompt verified | Input=%s sent | Waiting for HP", method)
 				} else {
-					appendOCRLog("AUTO RESU | Resurrection prompt verified | Input=%s failed | Error=%v", method, inputErr)
+					appendOCRLog("AUTO RESU | Resurrection prompt verified | Input=%s failed | Waiting", method)
 				}
 			} else if deathPause != nil && deathPause.ShouldScanResurrection() {
 				visible := event.err == nil && isResurrectionPrompt(event.text) && event.foreground
@@ -2402,10 +2432,11 @@ func runPicker(
 
 						sent := false
 						method := "Enter"
-						var inputErr error
 						if bot.ClickMethodEnabled() {
 							method = "click"
-							sent, inputErr = clickConfiguredAction(uintptr(hwnd), "AutoAccept")
+							if area, ok := LoadClickSkillROIs()["AutoAccept"]; ok && area.Selected {
+								sent = bot.CastClickAction("AutoAccept", uintptr(hwnd), area.X+area.Width/2, area.Y+area.Height/2, area.ClientWidth, area.ClientHeight)
+							}
 						} else {
 							sent = pressEnterToWindow(uintptr(hwnd))
 						}
@@ -2435,9 +2466,8 @@ func runPicker(
 							)
 
 							appendOCRLog(
-								"AUTO ACCEPT | INPUT=%s FAILED | Error=%v | HWND=0x%X",
+								"AUTO ACCEPT | INPUT=%s FAILED | HWND=0x%X",
 								method,
-								inputErr,
 								uintptr(hwnd),
 							)
 						}

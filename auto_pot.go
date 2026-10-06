@@ -70,6 +70,19 @@ type AutoPotController struct {
 	tpBarPercentScaleSet bool
 
 	hwnd uintptr
+
+	// clickSender, if set, routes HP/TP potion clicks through BotController's
+	// input queue so they don't race with skill clicks. Falls back to direct
+	// clickWindowClientPointReference when nil.
+	clickSender func(hwnd uintptr, x, y, refW, refH int) bool
+}
+
+// SetClickSender sets the function used to send HP/TP potion clicks. When set,
+// clicks go through the bot's input queue instead of directly to the window.
+func (p *AutoPotController) SetClickSender(sender func(hwnd uintptr, x, y, refW, refH int) bool) {
+	p.mu.Lock()
+	p.clickSender = sender
+	p.mu.Unlock()
 }
 
 type AutoPotStatus struct {
@@ -186,7 +199,15 @@ func statusMaximumPlausible(previous, next int) bool {
 	return maximumIsCloseEnough(previous, next)
 }
 
+// minimumHPMaximum is the floor below which an OCR maximum is treated as a
+// misread.  Even a level-1 Kathana character has more HP than this, and the
+// HUD bar minimum-width constraint makes values below this implausible.
+const minimumHPMaximum = 100
+
 func maximumIsCloseEnough(previous, next int) bool {
+	if next < minimumHPMaximum {
+		return false
+	}
 	if previous <= 0 {
 		return true
 	}
@@ -446,7 +467,14 @@ func (p *AutoPotController) useIfLow(rule *AutoPotRule, current, maximum int) bo
 	sent := false
 	if rule.Click {
 		if rule.ClickAreaSet {
-			sent = clickWindowClientPointReference(p.hwnd, rule.ClickX, rule.ClickY, rule.ClickReferenceWidth, rule.ClickReferenceHeight) == nil
+			p.mu.Lock()
+			sender := p.clickSender
+			p.mu.Unlock()
+			if sender != nil {
+				sent = sender(p.hwnd, rule.ClickX, rule.ClickY, rule.ClickReferenceWidth, rule.ClickReferenceHeight)
+			} else {
+				sent = clickWindowClientPointReference(p.hwnd, rule.ClickX, rule.ClickY, rule.ClickReferenceWidth, rule.ClickReferenceHeight) == nil
+			}
 		}
 	} else {
 		sent = pressKeyToWindow(p.hwnd, rule.SlotVK)
