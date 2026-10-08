@@ -71,17 +71,24 @@ type AutoPotController struct {
 
 	hwnd uintptr
 
-	// clickSender, if set, routes HP/TP potion clicks through BotController's
-	// input queue so they don't race with skill clicks. Falls back to direct
-	// clickWindowClientPointReference when nil.
+	// The senders route potion input through BotController's emergency-priority
+	// lane. Direct Windows input remains as a fallback for isolated tests.
 	clickSender func(hwnd uintptr, x, y, refW, refH int) bool
+	keySender   func(vk uintptr) bool
 }
 
-// SetClickSender sets the function used to send HP/TP potion clicks. When set,
-// clicks go through the bot's input queue instead of directly to the window.
+// SetClickSender sets the function used to send HP/TP potion clicks.
 func (p *AutoPotController) SetClickSender(sender func(hwnd uintptr, x, y, refW, refH int) bool) {
 	p.mu.Lock()
 	p.clickSender = sender
+	p.mu.Unlock()
+}
+
+// SetKeySender gives keyboard-mode AutoPot the same priority path as click
+// mode instead of bypassing BotController with a direct window message.
+func (p *AutoPotController) SetKeySender(sender func(vk uintptr) bool) {
+	p.mu.Lock()
+	p.keySender = sender
 	p.mu.Unlock()
 }
 
@@ -199,13 +206,11 @@ func statusMaximumPlausible(previous, next int) bool {
 	return maximumIsCloseEnough(previous, next)
 }
 
-// minimumHPMaximum is the floor below which an OCR maximum is treated as a
-// misread.  Even a level-1 Kathana character has more HP than this, and the
-// HUD bar minimum-width constraint makes values below this implausible.
-const minimumHPMaximum = 100
-
 func maximumIsCloseEnough(previous, next int) bool {
-	if next < minimumHPMaximum {
+	// Use the same lower bound as every other status-validation path. Keeping a
+	// second, higher HP-only floor rejected legitimate early-game values such as
+	// HP 50 and TP 30 even though minimumStatusMaximum explicitly permits them.
+	if next < minimumStatusMaximum {
 		return false
 	}
 	if previous <= 0 {
@@ -392,7 +397,12 @@ func learnFullStatusMaximum(
 }
 
 func (p *AutoPotController) Status() AutoPotStatus {
-	p.mu.Lock()
+	// Status is polled by the UI. It must never consume an HTTP worker forever
+	// behind a slow input operation or an unforeseen controller bug. A missed
+	// sample simply renders as "scanning" and the next poll refreshes it.
+	if !p.mu.TryLock() {
+		return AutoPotStatus{}
+	}
 	defer p.mu.Unlock()
 
 	return AutoPotStatus{
@@ -464,26 +474,53 @@ func (p *AutoPotController) useIfLow(rule *AutoPotRule, current, maximum int) bo
 	if time.Since(rule.lastUsed) < autoPotCooldown {
 		return false
 	}
+
+	// observeRule is called with p.mu already held. The old implementation
+	// attempted to lock p.mu again just to read clickSender, which deadlocked
+	// permanently the first time AutoPot actually crossed its threshold.
+	//
+	// Copy all input data and reserve the cooldown while protected, then release
+	// the AutoPot state lock before invoking any Windows input or BotController
+	// callback. This also keeps /api/status and Stop diagnostics responsive when
+	// input delivery is slow.
+	attemptAt := time.Now()
+	rule.lastUsed = attemptAt
+	click := rule.Click
+	clickAreaSet := rule.ClickAreaSet
+	clickX, clickY := rule.ClickX, rule.ClickY
+	refW, refH := rule.ClickReferenceWidth, rule.ClickReferenceHeight
+	slotVK := rule.SlotVK
+	clickSender := p.clickSender
+	keySender := p.keySender
+	hwnd := p.hwnd
+
 	sent := false
-	if rule.Click {
-		if rule.ClickAreaSet {
-			p.mu.Lock()
-			sender := p.clickSender
-			p.mu.Unlock()
-			if sender != nil {
-				sent = sender(p.hwnd, rule.ClickX, rule.ClickY, rule.ClickReferenceWidth, rule.ClickReferenceHeight)
-			} else {
-				sent = clickWindowClientPointReference(p.hwnd, rule.ClickX, rule.ClickY, rule.ClickReferenceWidth, rule.ClickReferenceHeight) == nil
+	func() {
+		p.mu.Unlock()
+		defer p.mu.Lock()
+
+		if click {
+			if !clickAreaSet {
+				return
 			}
+			if clickSender != nil {
+				sent = clickSender(hwnd, clickX, clickY, refW, refH)
+				return
+			}
+			sent = clickWindowClientPointReference(hwnd, clickX, clickY, refW, refH) == nil
+			return
 		}
-	} else {
-		sent = pressKeyToWindow(p.hwnd, rule.SlotVK)
-	}
-	if sent {
-		rule.lastUsed = time.Now()
-		return true
-	}
-	return false
+		if keySender != nil {
+			sent = keySender(slotVK)
+			return
+		}
+		sent = pressKeyToWindow(hwnd, slotVK)
+	}()
+
+	// Failed Windows input still consumes one cooldown. Without this, a denied
+	// cursor API call would be retried on every 10 ms detector scan and could
+	// monopolize the priority lane precisely when the desktop is unhealthy.
+	return sent
 }
 
 var statusPairPattern = regexp.MustCompile(`(\d{1,6})\s*/\s*(\d{1,6})`)

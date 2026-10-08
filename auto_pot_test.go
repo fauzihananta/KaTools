@@ -1,6 +1,84 @@
 package main
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
+
+func TestAutoPotClickCallbackRunsOutsideControllerMutex(t *testing.T) {
+	p := &AutoPotController{
+		hwnd: 1,
+		hp: AutoPotRule{
+			Enabled:      true,
+			Threshold:    70,
+			SlotVK:       1,
+			Click:        true,
+			ClickAreaSet: true,
+		},
+		hpMax: 100,
+	}
+	p.SetClickSender(func(hwnd uintptr, x, y, refW, refH int) bool {
+		// This is the same re-entrant status read performed by the web UI. It
+		// deadlocked forever when useIfLow tried to lock p.mu a second time.
+		_ = p.Status()
+		return true
+	})
+
+	done := make(chan []AutoPotEvent, 1)
+	go func() {
+		done <- p.ObserveBarPercents(50, true, 0, false)
+	}()
+
+	select {
+	case events := <-done:
+		if len(events) != 1 || !events[0].Pressed {
+			t.Fatalf("unexpected AutoPot event: %+v", events)
+		}
+	case <-time.After(250 * time.Millisecond):
+		t.Fatal("AutoPot click callback deadlocked its controller mutex")
+	}
+}
+
+func TestAutoPotStatusNeverWaitsBehindControllerMutex(t *testing.T) {
+	p := &AutoPotController{hpCurrent: 50, hpMax: 100}
+	p.mu.Lock()
+	started := time.Now()
+	status := p.Status()
+	p.mu.Unlock()
+
+	if time.Since(started) > 50*time.Millisecond {
+		t.Fatal("AutoPot status poll blocked behind controller mutex")
+	}
+	if status != (AutoPotStatus{}) {
+		t.Fatalf("busy AutoPot status = %+v, want an empty transient sample", status)
+	}
+}
+
+func TestAutoPotKeyboardUsesPrioritySenderOutsideControllerMutex(t *testing.T) {
+	p := &AutoPotController{
+		hwnd: 1,
+		hp: AutoPotRule{
+			Enabled:   true,
+			Threshold: 70,
+			SlotVK:    0x31,
+		},
+		hpMax: 100,
+	}
+	called := 0
+	p.SetKeySender(func(vk uintptr) bool {
+		_ = p.Status()
+		if vk != 0x31 {
+			t.Fatalf("priority sender received VK %#x, want 0x31", vk)
+		}
+		called++
+		return true
+	})
+
+	events := p.ObserveBarPercents(50, true, 0, false)
+	if called != 1 || len(events) != 1 || !events[0].Pressed {
+		t.Fatalf("keyboard AutoPot priority path: calls=%d events=%+v", called, events)
+	}
+}
 
 func TestParseStatusPairs(t *testing.T) {
 	hpCurrent, hpMax, tpCurrent, tpMax, ok := parseStatusPairs("1945/2102\n2352 / 2497")

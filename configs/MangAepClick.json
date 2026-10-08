@@ -1,15 +1,15 @@
 {
   "hwnd": "",
   "autoAcceptEnabled": true,
-  "autoPauseDeathEnabled": false,
-  "autoResurrectEnabled": false,
+  "autoPauseDeathEnabled": true,
+  "autoResurrectEnabled": true,
   "assistSkillVK": 0,
   "assistSkillDelay": 1,
   "targetUntilDeadEnabled": false,
   "targetUntilDeadSupport": false,
   "targetUntilDeadCharacterName": "",
   "targetNameFilterMode": "skip",
-  "clickWhitelistMode": true,
+  "clickWhitelistMode": false,
   "clickWhitelistTargetNames": "Choniokusin",
   "chatTextClickEnabled": false,
   "chatTextClickKeyword": "party bro",
@@ -73,14 +73,14 @@
     {
       "name": "2",
       "vk": 50,
-      "enabled": true,
+      "enabled": false,
       "delay": 6,
       "targetSearch": false
     },
     {
       "name": "3",
       "vk": 51,
-      "enabled": true,
+      "enabled": false,
       "delay": 8,
       "targetSearch": false
     },
@@ -94,7 +94,7 @@
     {
       "name": "5",
       "vk": 53,
-      "enabled": true,
+      "enabled": false,
       "delay": 185,
       "targetSearch": false
     },
@@ -122,7 +122,7 @@
     {
       "name": "9",
       "vk": 57,
-      "enabled": true,
+      "enabled": false,
       "delay": 182,
       "targetSearch": false
     },

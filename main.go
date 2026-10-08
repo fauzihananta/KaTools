@@ -8,9 +8,11 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 	"unsafe"
@@ -180,6 +182,15 @@ func enablePerMonitorDPIAwareness() {
 type RuntimeManager struct {
 	mu sync.RWMutex
 
+	// activeControl is the lock-free emergency lane used by UI Stop and the
+	// global hotkey. It contains only immutable pointers for one runtime
+	// generation, so cancellation never waits for RuntimeManager.mu, OCR, a
+	// window-title query, or a click worker.
+	activeControl atomic.Pointer[runtimeControl]
+	runningFlag   atomic.Bool
+	startingFlag  atomic.Bool
+	stopRequested atomic.Bool
+
 	hwnd uintptr
 
 	wgcCmd *exec.Cmd
@@ -206,12 +217,40 @@ type RuntimeManager struct {
 
 	running  bool
 	starting bool
+	stopping bool
 
-	lastHwnd uintptr
+	lastHwnd   uintptr
 	lastConfig WebBotConfig
 
 	stopCh chan struct{}
 	doneCh chan struct{}
+}
+
+type runtimeControl struct {
+	stopCh      chan struct{}
+	bot         *BotController
+	wgcCmd      *exec.Cmd
+	requestOnce sync.Once
+}
+
+func (c *runtimeControl) requestStop() {
+	if c == nil {
+		return
+	}
+	c.requestOnce.Do(func() {
+		// Closing the detector channel and the per-generation bot token are both
+		// local, non-blocking operations. Process.Kill is kept off the caller's
+		// control path in case Windows is slow to service the process handle.
+		if c.stopCh != nil {
+			close(c.stopCh)
+		}
+		if c.bot != nil {
+			c.bot.RequestStop()
+		}
+		if c.wgcCmd != nil && c.wgcCmd.Process != nil {
+			go func() { _ = c.wgcCmd.Process.Kill() }()
+		}
+	})
 }
 
 func NewRuntimeManager() *RuntimeManager {
@@ -256,7 +295,7 @@ func (m *RuntimeManager) Start(
 
 	m.mu.Lock()
 
-	if m.running || m.starting {
+	if m.running || m.starting || m.stopping {
 		m.mu.Unlock()
 
 		return fmt.Errorf(
@@ -265,12 +304,15 @@ func (m *RuntimeManager) Start(
 	}
 
 	m.starting = true
+	m.startingFlag.Store(true)
+	m.stopRequested.Store(false)
 	m.lastConfig = cfg
 	m.lastHwnd = hwnd
 
 	m.mu.Unlock()
 
 	defer func() {
+		m.startingFlag.Store(false)
 		m.mu.Lock()
 		m.starting = false
 		m.mu.Unlock()
@@ -294,6 +336,7 @@ func (m *RuntimeManager) Start(
 	// WGC stays active for the built-in DC notification scanner, even when the
 	// optional OCR-driven features are disabled.
 	bot := NewBotController(hwnd, newDefaultBotConfig())
+	botStartGeneration := atomic.LoadUint64(&bot.stopGeneration)
 	autoAccept := NewAutoAcceptController(cfg.AutoAcceptEnabled)
 	autoPot := NewAutoPotController(hwnd, cfg)
 	emergency := NewEmergencySkillController(hwnd, cfg)
@@ -324,6 +367,27 @@ func (m *RuntimeManager) Start(
 
 	stopCh := make(chan struct{})
 	doneCh := make(chan struct{})
+	control := &runtimeControl{stopCh: stopCh, bot: bot, wgcCmd: wgcCmd}
+	m.activeControl.Store(control)
+	runtimePublished := false
+	defer func() {
+		if runtimePublished {
+			return
+		}
+		control.requestStop()
+		m.activeControl.CompareAndSwap(control, nil)
+		m.mu.Lock()
+		if m.stopCh == stopCh {
+			m.wgcCmd = nil
+			m.hwnd = 0
+			m.stopCh = nil
+			m.doneCh = nil
+		}
+		m.mu.Unlock()
+	}()
+	if m.stopRequested.Load() {
+		control.requestStop()
+	}
 
 	m.mu.Lock()
 
@@ -526,6 +590,17 @@ func (m *RuntimeManager) Start(
 	// ========================================================
 
 	m.mu.Lock()
+	if m.stopping || m.stopRequested.Load() {
+		m.mu.Unlock()
+		control.requestStop()
+		m.activeControl.CompareAndSwap(control, nil)
+		_ = windows.UnmapViewOfFile(base)
+		_ = windows.CloseHandle(mapping)
+		if wgcCmd.Process != nil {
+			_ = wgcCmd.Process.Kill()
+		}
+		return fmt.Errorf("KaTools startup was cancelled")
+	}
 
 	m.mapping = mapping
 	m.memory = base
@@ -549,6 +624,8 @@ func (m *RuntimeManager) Start(
 	m.captureOffsetY = 0
 
 	m.running = true
+	m.runningFlag.Store(true)
+	runtimePublished = true
 
 	m.mu.Unlock()
 
@@ -600,7 +677,7 @@ func (m *RuntimeManager) Start(
 	// Start Bot
 	// ========================================================
 
-	bot.Start()
+	bot.startWithGeneration(botStartGeneration)
 	if targetUntil.StartInitialTarget() {
 		if bot.CastTarget() {
 			appendOCRLog("TARGET UNTIL DEAD | Initial target | Target sent")
@@ -658,6 +735,33 @@ func (m *RuntimeManager) Start(
 // ============================================================
 
 func (m *RuntimeManager) Stop() {
+	// The cancellation phase is deliberately lock-free. Even if another path is
+	// stuck while holding RuntimeManager.mu, the exact active runtime generation
+	// receives detector and bot cancellation immediately.
+	m.stopRequested.Store(true)
+	m.runningFlag.Store(false)
+	if control := m.activeControl.Load(); control != nil {
+		control.requestStop()
+	}
+
+	// Resource detachment/reaping is best-effort background cleanup. No UI or
+	// hotkey caller waits for it.
+	stopSignaled := make(chan struct{})
+	go m.finishStop(stopSignaled)
+	go func() {
+		select {
+		case <-stopSignaled:
+		case <-time.After(3 * time.Second):
+			dumpGoroutines("runtime cleanup blocked for 3s after lock-free Stop")
+			appendOCRLog("STOP CONTROL SLOW | runtime cleanup could not acquire/detach state within 3s")
+		}
+	}()
+}
+
+func (m *RuntimeManager) finishStop(stopSignaled chan<- struct{}) {
+	var signalOnce sync.Once
+	signalCaller := func() { signalOnce.Do(func() { close(stopSignaled) }) }
+	defer signalCaller()
 
 	m.mu.Lock()
 
@@ -665,9 +769,18 @@ func (m *RuntimeManager) Stop() {
 		!m.starting {
 
 		m.mu.Unlock()
-
+		signalCaller()
 		return
 	}
+	// Exactly one teardown may own the runtime resources. Without this guard,
+	// the hotkey timeout path could start a fresh WGC/OCR runtime while the old
+	// one was still unmapping its capture resources.
+	if m.stopping {
+		m.mu.Unlock()
+		signalCaller()
+		return
+	}
+	m.stopping = true
 
 	bot := m.bot
 	autoAccept := m.autoAccept
@@ -681,6 +794,7 @@ func (m *RuntimeManager) Stop() {
 	doneCh := m.doneCh
 
 	m.running = false
+	m.runningFlag.Store(false)
 
 	m.bot = nil
 	m.autoAccept = nil
@@ -704,6 +818,25 @@ func (m *RuntimeManager) Stop() {
 	m.doneCh = nil
 
 	m.mu.Unlock()
+	control := m.activeControl.Load()
+	if control != nil {
+		control.requestStop()
+	}
+	defer func() {
+		// If Stop raced an in-progress Start, keep the stop barrier raised until
+		// Start observes m.stopping and runs its deferred starting=false cleanup.
+		// Otherwise a slow startup could publish a new live runtime after Stop.
+		for {
+			m.mu.Lock()
+			if !m.starting {
+				m.stopping = false
+				m.mu.Unlock()
+				break
+			}
+			m.mu.Unlock()
+			time.Sleep(10 * time.Millisecond)
+		}
+	}()
 
 	fmt.Println()
 	fmt.Println("----------------------------------------")
@@ -711,12 +844,34 @@ func (m *RuntimeManager) Stop() {
 	fmt.Println("----------------------------------------")
 
 	// ========================================================
+	// Stop WGC Immediately
+	// ========================================================
+	// Kill WGC at millisecond 0 so it terminates in parallel with the bot
+	// and detector teardown, rather than waiting up to 1-2 seconds behind
+	// doneCh and bot.Stop().
+	if wgcCmd != nil && wgcCmd.Process != nil {
+		_ = wgcCmd.Process.Kill()
+	}
+
+	// ========================================================
 	// Stop detector / OCR loop
 	// ========================================================
 
-	if stopCh != nil {
+	// The active control token normally closed this already. Only close a
+	// legacy/unpublished channel here when it is not owned by that token.
+	if stopCh != nil && (control == nil || control.stopCh != stopCh) {
 		close(stopCh)
 	}
+
+	// Broadcast bot cancellation but never wait on the input workers from this
+	// control path. This is what makes both UI Stop and Alt+F12 independent from
+	// click delivery.
+	if bot != nil && (control == nil || control.bot != bot) {
+		bot.RequestStop()
+	}
+
+	signalCaller()
+	appendOCRLog("RUNTIME STOP SIGNALLED | Input and capture cancellation broadcast")
 
 	if doneCh != nil {
 
@@ -725,17 +880,19 @@ func (m *RuntimeManager) Stop() {
 		case <-doneCh:
 
 		case <-time.After(
-			1 * time.Second,
+			5 * time.Second,
 		):
+			appendOCRLog("STOP SLOW | detector loop still draining after 5s; goroutine dump written")
+			dumpGoroutines("detector loop still draining 5s after Stop")
+			// Shared capture memory must stay mapped until runPicker exits.
+			// Waiting here is safe because this cleanup runs in the background;
+			// the UI and hotkey already returned from the signal phase.
+			<-doneCh
 		}
 	}
-
-	// ========================================================
-	// Stop Bot
-	// ========================================================
-
-	if bot != nil {
-		bot.Stop()
+	if bot != nil && !bot.WaitForWorkers(5*time.Second) {
+		appendOCRLog("STOP SLOW | bot workers still draining after 5s; goroutine dump written")
+		dumpGoroutines("bot workers still draining 5s after Stop")
 	}
 
 	_ = autoAccept
@@ -754,16 +911,23 @@ func (m *RuntimeManager) Stop() {
 	}
 
 	// ========================================================
-	// Stop WGC
+	// Reclaim WGC Process
 	// ========================================================
 
-	if wgcCmd != nil &&
-		wgcCmd.Process != nil {
-
-		_ = wgcCmd.Process.Kill()
-		_ = wgcCmd.Wait()
-
+	if wgcCmd != nil && wgcCmd.Process != nil {
+		waitCh := make(chan struct{})
+		go func() {
+			_ = wgcCmd.Wait()
+			close(waitCh)
+		}()
+		select {
+		case <-waitCh:
+		case <-time.After(500 * time.Millisecond):
+		}
 		fmt.Println("[WGC] Stopped.")
+	}
+	if control != nil {
+		m.activeControl.CompareAndSwap(control, nil)
 	}
 
 	fmt.Println("[KaTools] Runtime stopped.")
@@ -776,51 +940,51 @@ func (m *RuntimeManager) Stop() {
 func (m *RuntimeManager) Status() map[string]interface{} {
 
 	m.mu.RLock()
-	defer m.mu.RUnlock()
+	hwnd := m.hwnd
+	bot := m.bot
+	autoPot := m.autoPot
+	m.mu.RUnlock()
 
+	running := m.runningFlag.Load()
+	starting := m.startingFlag.Load()
 	title := ""
-
-	if m.hwnd != 0 {
-		title =
-			getWindowTitle(
-				windows.Handle(m.hwnd),
-			)
+	if hwnd != 0 {
+		title = getWindowTitle(windows.Handle(hwnd))
 	}
 
 	botRunning := false
 
-	if m.bot != nil {
-		botRunning =
-			m.bot.IsRunning()
+	if bot != nil {
+		botRunning = bot.IsRunning()
 	}
 
 	autoPotStatus := AutoPotStatus{}
-	if m.autoPot != nil {
-		autoPotStatus = m.autoPot.Status()
+	if autoPot != nil {
+		autoPotStatus = autoPot.Status()
 	}
 
 	return map[string]interface{}{
 
-		"running": m.running,
+		"running": running,
 
-		"starting": m.starting,
+		"starting": starting,
 
 		"hwnd": func() string {
 
-			if m.hwnd == 0 {
+			if hwnd == 0 {
 				return ""
 			}
 
 			return fmt.Sprintf(
 				"0x%X",
-				m.hwnd,
+				hwnd,
 			)
 		}(),
 
 		"title": title,
 
 		"botRunning": botRunning,
-		"paused":     m.running && !botRunning,
+		"paused":     running && !botRunning,
 
 		"autoPot": autoPotStatus,
 	}
@@ -850,21 +1014,22 @@ func (m *RuntimeManager) AutoAccept() *AutoAcceptController {
 // bot workers are restarted internally so enabled flags, delays, and the skill
 // list all take effect immediately and no old scheduler remains active.
 func (m *RuntimeManager) UpdateConfig(cfg WebBotConfig) error {
-	m.mu.RLock()
+	m.mu.Lock()
 
 	if !m.running || m.bot == nil || m.autoAccept == nil || m.autoPot == nil || m.emergency == nil || m.deathPause == nil || m.targetUntil == nil {
-		m.mu.RUnlock()
+		m.mu.Unlock()
 		return fmt.Errorf("KaTools is not running")
 	}
 
 	if cfg.HWND != "" {
 		hwnd, err := parseHWND(cfg.HWND)
 		if err != nil || hwnd != m.hwnd {
-			m.mu.RUnlock()
+			m.mu.Unlock()
 			return fmt.Errorf("target window cannot be changed while running")
 		}
 	}
 
+	m.lastConfig = cfg
 	bot := m.bot
 	autoAccept := m.autoAccept
 	autoPot := m.autoPot
@@ -872,9 +1037,15 @@ func (m *RuntimeManager) UpdateConfig(cfg WebBotConfig) error {
 	deathPause := m.deathPause
 	targetUntil := m.targetUntil
 	chatTextClick := m.chatTextClick
-	m.mu.RUnlock()
+	m.mu.Unlock()
 
 	bot.Stop()
+	m.mu.RLock()
+	stillCurrent := m.running && m.bot == bot && !m.stopping
+	m.mu.RUnlock()
+	if !stillCurrent {
+		return fmt.Errorf("KaTools stopped while applying live config")
+	}
 	applyWebBotConfig(bot, autoAccept, autoPot, emergency, deathPause, targetUntil, cfg)
 	chatTextClick.Update(cfg.ChatTextClickEnabled, cfg.ChatTextClickKeyword, cfg.ChatTextClickYOffset)
 	bot.Start()
@@ -937,13 +1108,46 @@ func (m *RuntimeManager) UpdateClickSkills(cfg WebBotConfig) error {
 }
 
 func (m *RuntimeManager) IsRunning() bool {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	return m.running
+	return m.runningFlag.Load()
+}
+
+// ToggleFromHotkey keeps the global hotkey independent from the click and key
+// workers. Death Pause stops only BotController while capture/OCR remains
+// active; an explicit Alt+F12 in that state resumes the existing bot directly
+// instead of first tearing down and rebuilding the whole runtime.
+func (m *RuntimeManager) ToggleFromHotkey() string {
+	running := m.runningFlag.Load()
+	control := m.activeControl.Load()
+	var bot *BotController
+	if control != nil {
+		bot = control.bot
+	}
+	if running && bot != nil && !bot.IsRunning() {
+		if !m.stopRequested.Load() {
+			bot.Start()
+			if bot.IsRunning() && !m.stopRequested.Load() {
+				appendOCRLog("HOTKEY RESUME | Bot resumed without restarting capture")
+				return "resumed"
+			}
+			return "resume failed"
+		}
+		return "stop in progress"
+	}
+
+	if running {
+		m.Stop()
+		return "stopped"
+	}
+
+	m.HotkeyStart()
+	if m.IsRunning() {
+		return "started"
+	}
+	return "start failed"
 }
 
 // HotkeyStart restarts the bot using the last known config and target window.
-// Used by the Alt+Home global hotkey.
+// Used by the Alt+F12 global hotkey.
 func (m *RuntimeManager) HotkeyStart() {
 	m.mu.RLock()
 	cfg := m.lastConfig
@@ -1934,6 +2138,27 @@ func runPicker(
 
 	resetOCRLog()
 
+	// Bot.Start runs just before this picker initializes and resetOCRLog rotates
+	// the file. Record the effective runtime state here (after the rotation),
+	// so the log always makes clear whether the live bot is dispatching clicks
+	// or keyboard keys and how many skill slots it actually received.
+	bot.mu.Lock()
+	clickMode := bot.config.ClickMode
+	enabledSkills := 0
+	for _, skill := range bot.config.Skills {
+		if skill.Enabled {
+			enabledSkills++
+		}
+	}
+	targetGate := bot.targetActionFilterEnabled
+	chatPaused := bot.chatPaused
+	bot.mu.Unlock()
+	inputMethod := "keyboard"
+	if clickMode {
+		inputMethod = "click"
+	}
+	appendOCRLog("BOT START | Input=%s | Active skills=%d | Target filter=%t | Chat paused=%t", inputMethod, enabledSkills, targetGate, chatPaused)
+
 	fmt.Println("----------------------------------------")
 	fmt.Println("PartyDetector + OCR v6")
 	fmt.Println("----------------------------------------")
@@ -2268,15 +2493,12 @@ func runPicker(
 			}
 			texts := append([]string{event.text}, event.candidates...)
 			if dcNotification.Observe(texts) {
-				// Stop the scheduler before acknowledging the dialog: after this point no skill,
-				// target, potion, or other bot input can race the closing game window.
-				bot.Stop()
 				sent := false
 				method := "Enter"
 				if bot.ClickMethodEnabled() {
 					method = "click"
 					if area, ok := LoadClickSkillROIs()["DCOk"]; ok && area.Selected {
-						sent = bot.CastClickAction("DCOk", uintptr(hwnd), area.X+area.Width/2, area.Y+area.Height/2, area.ClientWidth, area.ClientHeight)
+						sent = bot.CastClickAction("DCOk", uintptr(hwnd), area.X+area.Width/2, area.Y+area.Height/2, area.ClientWidth, area.ClientHeight, popupDoubleClickDelay, false)
 					}
 				} else {
 					sent = pressEnterToWindow(uintptr(hwnd))
@@ -2329,7 +2551,7 @@ func runPicker(
 				if bot.ClickMethodEnabled() {
 					method = "click"
 					if area, ok := LoadClickSkillROIs()["AutoResu"]; ok && area.Selected {
-						sent = bot.CastClickAction("AutoResu", uintptr(hwnd), area.X+area.Width/2, area.Y+area.Height/2, area.ClientWidth, area.ClientHeight)
+						sent = bot.CastClickAction("AutoResu", uintptr(hwnd), area.X+area.Width/2, area.Y+area.Height/2, area.ClientWidth, area.ClientHeight, popupDoubleClickDelay, true)
 					}
 				} else {
 					sent = pressEnterToWindow(uintptr(hwnd))
@@ -2435,7 +2657,7 @@ func runPicker(
 						if bot.ClickMethodEnabled() {
 							method = "click"
 							if area, ok := LoadClickSkillROIs()["AutoAccept"]; ok && area.Selected {
-								sent = bot.CastClickAction("AutoAccept", uintptr(hwnd), area.X+area.Width/2, area.Y+area.Height/2, area.ClientWidth, area.ClientHeight)
+								sent = bot.CastClickAction("AutoAccept", uintptr(hwnd), area.X+area.Width/2, area.Y+area.Height/2, area.ClientWidth, area.ClientHeight, popupDoubleClickDelay, false)
 							}
 						} else {
 							sent = pressEnterToWindow(uintptr(hwnd))
@@ -3769,6 +3991,25 @@ var (
 	ocrLogPath      string
 	ocrLogStartedAt time.Time
 )
+
+var goroutineDumpMu sync.Mutex
+
+// dumpGoroutines records actionable evidence if background cleanup ever takes
+// unusually long on another machine. It is intentionally separate from the
+// rotating OCR log so a subsequent Start cannot erase the stack snapshot.
+func dumpGoroutines(reason string) {
+	buffer := make([]byte, 1<<20)
+	n := runtime.Stack(buffer, true)
+
+	goroutineDumpMu.Lock()
+	defer goroutineDumpMu.Unlock()
+	f, err := os.OpenFile("katools_stuck.log", os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	fmt.Fprintf(f, "\n========================================\n%s | %s\n========================================\n%s\n", time.Now().Format("2006-01-02 15:04:05.000"), reason, buffer[:n])
+}
 
 const ocrLogRotationInterval = 6 * time.Hour
 

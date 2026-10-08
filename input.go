@@ -11,25 +11,30 @@ import (
 	"KaTools/cursor_hook"
 )
 
-var errCursorAPI = errors.New("cursor API failure")
+var (
+	errCursorAPI      = errors.New("cursor API failure")
+	errClickCanceled  = errors.New("virtual click canceled")
+	errClickPreempted = errors.New("virtual click preempted by higher-priority input")
+)
 
 const (
-	wmKeyDown                 = 0x0100
-	wmKeyUp                   = 0x0101
-	wmMouseMove               = 0x0200
-	wmLButtonDown             = 0x0201
-	wmLButtonUp               = 0x0202
-	mkLButton                 = 0x0001
-	smtoAbortIfHung           = 0x0002
-	cwpSkipInvisible          = 0x0001
-	cwpSkipDisabled           = 0x0002
-	cwpSkipTransparent        = 0x0004
+	wmKeyDown                  = 0x0100
+	wmKeyUp                    = 0x0101
+	wmMouseMove                = 0x0200
+	wmLButtonDown              = 0x0201
+	wmLButtonUp                = 0x0202
+	mkLButton                  = 0x0001
+	smtoAbortIfHung            = 0x0002
+	cwpSkipInvisible           = 0x0001
+	cwpSkipDisabled            = 0x0002
+	cwpSkipTransparent         = 0x0004
 	virtualClickCursorTimeout  = 250 * time.Millisecond
+	virtualClickMessageTimeout = 250 * time.Millisecond
 	virtualClickPollInterval   = 2 * time.Millisecond
 	virtualClickMoveSettle     = 40 * time.Millisecond
 	virtualClickButtonHold     = 50 * time.Millisecond
 	virtualClickReleaseSettle  = 40 * time.Millisecond
-	clipCursorLockSize        = 10 // pixel radius around target to lock cursor
+	clipCursorLockSize         = 10 // pixel radius around target to lock cursor
 )
 
 var (
@@ -41,8 +46,8 @@ var (
 	procClientToScreen         = user32DLL.NewProc("ClientToScreen")
 	procSetCursorPos           = user32DLL.NewProc("SetCursorPos")
 	procGetCursorPos           = user32DLL.NewProc("GetCursorPos")
-	procClipCursor            = user32DLL.NewProc("ClipCursor")
-	procGetClipCursor         = user32DLL.NewProc("GetClipCursor")
+	procClipCursor             = user32DLL.NewProc("ClipCursor")
+	procGetClipCursor          = user32DLL.NewProc("GetClipCursor")
 	virtualClickMu             sync.Mutex
 	clickDiagnosticMu          sync.Mutex
 	clickDiagnosticsLogged     = make(map[string]struct{})
@@ -153,6 +158,58 @@ func clickWindowClientPoint(hwnd uintptr, x, y int) error {
 func clickWindowClientPointReference(hwnd uintptr, x, y, referenceWidth, referenceHeight int) error {
 	virtualClickMu.Lock()
 	defer virtualClickMu.Unlock()
+	return clickWindowClientPointReferenceLocked(hwnd, x, y, referenceWidth, referenceHeight)
+}
+
+// clickWindowClientPointReferenceCancelable prevents stopped skill workers
+// from draining through virtualClickMu and clicking after the user requested
+// Stop. The second cancellation check closes the race between TryLock and the
+// first Windows cursor operation.
+func clickWindowClientPointReferenceCancelable(stop <-chan struct{}, hwnd uintptr, x, y, referenceWidth, referenceHeight int) error {
+	return clickWindowClientPointReferencePriority(stop, nil, hwnd, x, y, referenceWidth, referenceHeight)
+}
+
+// clickWindowClientPointReferencePriority is the non-queued priority gate for
+// Click Method. Regular attack timers still race independently, but a waiting
+// attack abandons its cast as soon as Emergency/AutoPot/Buff becomes pending.
+// The second check after TryLock prevents an attack from stealing the physical
+// cursor lane in the small window between the first check and lock acquisition.
+func clickWindowClientPointReferencePriority(stop <-chan struct{}, preempted func() bool, hwnd uintptr, x, y, referenceWidth, referenceHeight int) error {
+	for {
+		select {
+		case <-stop:
+			return errClickCanceled
+		default:
+		}
+		if preempted != nil && preempted() {
+			return errClickPreempted
+		}
+		if virtualClickMu.TryLock() {
+			break
+		}
+		timer := time.NewTimer(5 * time.Millisecond)
+		select {
+		case <-stop:
+			if !timer.Stop() {
+				<-timer.C
+			}
+			return errClickCanceled
+		case <-timer.C:
+		}
+	}
+	defer virtualClickMu.Unlock()
+	select {
+	case <-stop:
+		return errClickCanceled
+	default:
+	}
+	if preempted != nil && preempted() {
+		return errClickPreempted
+	}
+	return clickWindowClientPointReferenceLocked(hwnd, x, y, referenceWidth, referenceHeight)
+}
+
+func clickWindowClientPointReferenceLocked(hwnd uintptr, x, y, referenceWidth, referenceHeight int) error {
 	savedX, savedY := x, y
 	if hwnd == 0 || x < 0 || y < 0 || x > 0x7fff || y > 0x7fff {
 		return fmt.Errorf("invalid click target or client point %d,%d", x, y)
@@ -235,7 +292,7 @@ func clickWindowClientPointReference(hwnd uintptr, x, y, referenceWidth, referen
 		var result uintptr
 		ok, _, callErr := procSendMessageTimeoutW.Call(
 			messageHWND, uintptr(message), keyState, lParam,
-			smtoAbortIfHung, 1000, uintptr(unsafe.Pointer(&result)),
+			smtoAbortIfHung, uintptr(virtualClickMessageTimeout.Milliseconds()), uintptr(unsafe.Pointer(&result)),
 		)
 		if ok == 0 {
 			if callErr != syscall.Errno(0) {
@@ -375,7 +432,7 @@ func clickWindowClippedReference(hwnd uintptr, x, y, referenceWidth, referenceHe
 		var result uintptr
 		ok, _, callErr := procSendMessageTimeoutW.Call(
 			messageHWND, uintptr(message), keyState, lParam,
-			smtoAbortIfHung, 1000, uintptr(unsafe.Pointer(&result)),
+			smtoAbortIfHung, uintptr(virtualClickMessageTimeout.Milliseconds()), uintptr(unsafe.Pointer(&result)),
 		)
 		if ok == 0 {
 			if callErr != syscall.Errno(0) {

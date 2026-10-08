@@ -2,9 +2,11 @@ package main
 
 import (
 	"sync"
+	"time"
 )
 
 const emergencySkillSlotCount = 5
+const emergencySkillRepeatCooldown = 750 * time.Millisecond
 
 type EmergencySkillController struct {
 	mu sync.RWMutex
@@ -18,6 +20,7 @@ type EmergencySkillController struct {
 	targetPresent     bool
 	targetActionReady bool
 	panicTargetSent   bool
+	lastAttempt       [emergencySkillSlotCount]time.Time
 }
 
 func NewEmergencySkillController(hwnd uintptr, cfg WebBotConfig) *EmergencySkillController {
@@ -46,6 +49,7 @@ func (c *EmergencySkillController) Update(cfg WebBotConfig) {
 	// previously sent panic E from suppressing the newly selected emergency
 	// setup while HP is still low.
 	c.panicTargetSent = false
+	c.lastAttempt = [emergencySkillSlotCount]time.Time{}
 	c.mu.Unlock()
 }
 
@@ -55,21 +59,37 @@ func (c *EmergencySkillController) SetInputSender(sender func(WebEmergencySkillC
 	c.mu.Unlock()
 }
 
-func (c *EmergencySkillController) sendSkill(slot WebEmergencySkillConfig) {
-	c.mu.RLock()
+func (c *EmergencySkillController) sendSkill(slot WebEmergencySkillConfig) bool {
+	index := slot.Index - 1
+	if index < 0 || index >= emergencySkillSlotCount {
+		index = 0
+	}
+
+	c.mu.Lock()
+	if time.Since(c.lastAttempt[index]) < emergencySkillRepeatCooldown {
+		c.mu.Unlock()
+		return false
+	}
+	attemptAt := time.Now()
+	c.lastAttempt[index] = attemptAt
 	sender := c.inputSender
-	c.mu.RUnlock()
+	hwnd := c.hwnd
+	c.mu.Unlock()
+
+	sent := false
 	if sender != nil {
-		sender(slot)
-		return
-	}
-	if slot.Click {
+		sent = sender(slot)
+	} else if slot.Click {
 		if slot.ClickAreaSet {
-			_ = clickWindowClientPoint(c.hwnd, slot.ClickX, slot.ClickY)
+			sent = clickWindowClientPoint(hwnd, slot.ClickX, slot.ClickY) == nil
 		}
-		return
+	} else {
+		sent = pressKeyToWindow(hwnd, slot.VK)
 	}
-	_ = pressKeyToWindow(c.hwnd, slot.VK)
+
+	// Failed input also consumes the short cooldown; otherwise a denied cursor
+	// API call would be retried on every detector frame and starve other work.
+	return sent
 }
 
 func (c *EmergencySkillController) IsAnyEnabled() bool {
@@ -106,11 +126,13 @@ func (c *EmergencySkillController) ObserveTargetPanel(present, targetReady bool)
 	c.mu.Unlock()
 }
 
-// ObserveHPPercent sends all non-target emergency slots on every low-HP scan.
-// Target-required slots are sent only after the target panel is visibly active
-// (and, when applicable, has passed the existing skip-target gate). The bool
-// result asks the caller to send one E through BotController's normal target
-// path; that preserves chat guarding and target-name validation.
+// ObserveHPPercent attempts every eligible non-target emergency slot while HP
+// is low. Each slot has its own short cooldown, so a fast detector loop cannot
+// flood the input lane. Target-required slots are attempted only after the
+// target panel is visibly active (and, when applicable, has passed the existing
+// skip-target gate). The bool result asks the caller to send one E through
+// BotController's normal target path; that preserves chat guarding and
+// target-name validation.
 func (c *EmergencySkillController) ObserveHPPercent(percent float64, barFound bool, threshold float64) (requestTarget bool) {
 	if !barFound || threshold <= 0 {
 		return false
@@ -119,6 +141,7 @@ func (c *EmergencySkillController) ObserveHPPercent(percent float64, barFound bo
 	if percent > threshold {
 		c.mu.Lock()
 		c.panicTargetSent = false
+		c.lastAttempt = [emergencySkillSlotCount]time.Time{}
 		c.mu.Unlock()
 		return false
 	}

@@ -89,3 +89,52 @@ func TestAssistPanicDoesNotWaitForFirstTargetMonitorFrame(t *testing.T) {
 		t.Fatal("Assist Panic Target should acquire once even before the first target-panel sample")
 	}
 }
+
+func TestEmergencySkillCooldownPreventsScannerFlood(t *testing.T) {
+	c := NewEmergencySkillController(0, WebBotConfig{EmergencySkills: []WebEmergencySkillConfig{{
+		Index:   1,
+		Enabled: true,
+		VK:      0x31,
+	}}})
+	sent := 0
+	c.SetInputSender(func(WebEmergencySkillConfig) bool {
+		// Re-entering the controller here also verifies that its mutex is not
+		// held while the BotController input callback runs.
+		_ = c.IsAnyEnabled()
+		sent++
+		return true
+	})
+
+	c.ObserveHPPercent(50, true, 70)
+	c.ObserveHPPercent(50, true, 70)
+	if sent != 1 {
+		t.Fatalf("two adjacent low-HP scans sent %d emergency casts, want 1", sent)
+	}
+
+	// A recovered-then-low episode must fire immediately rather than inherit
+	// the previous episode's cooldown.
+	c.ObserveHPPercent(90, true, 70)
+	c.ObserveHPPercent(50, true, 70)
+	if sent != 2 {
+		t.Fatalf("new low-HP episode sent %d total emergency casts, want 2", sent)
+	}
+}
+
+func TestEmergencySkillFailureStillConsumesCooldown(t *testing.T) {
+	c := NewEmergencySkillController(0, WebBotConfig{EmergencySkills: []WebEmergencySkillConfig{{
+		Index:   1,
+		Enabled: true,
+		VK:      0x31,
+	}}})
+	attempts := 0
+	c.SetInputSender(func(WebEmergencySkillConfig) bool {
+		attempts++
+		return false
+	})
+
+	c.ObserveHPPercent(50, true, 70)
+	c.ObserveHPPercent(50, true, 70)
+	if attempts != 1 {
+		t.Fatalf("two adjacent failed sends made %d attempts, want 1", attempts)
+	}
+}

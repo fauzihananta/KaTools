@@ -54,8 +54,8 @@
     "clientHeight": 1440
   },
   "AutoAccept": {
-    "x": 936,
-    "y": 768,
+    "x": 932,
+    "y": 765,
     "width": 1,
     "height": 1,
     "selected": true,
@@ -63,8 +63,8 @@
     "clientHeight": 1440
   },
   "AutoResu": {
-    "x": 936,
-    "y": 767,
+    "x": 935,
+    "y": 766,
     "width": 1,
     "height": 1,
     "selected": true,
@@ -81,8 +81,8 @@
     "clientHeight": 1440
   },
   "DCOk": {
-    "x": 1063,
-    "y": 767,
+    "x": 1068,
+    "y": 763,
     "width": 1,
     "height": 1,
     "selected": true,
@@ -90,8 +90,26 @@
     "clientHeight": 1440
   },
   "Emergency1": {
-    "x": 1492,
-    "y": 1197,
+    "x": 1509,
+    "y": 1198,
+    "width": 1,
+    "height": 1,
+    "selected": true,
+    "clientWidth": 1920,
+    "clientHeight": 1440
+  },
+  "F1": {
+    "x": 1315,
+    "y": 1245,
+    "width": 1,
+    "height": 1,
+    "selected": true,
+    "clientWidth": 1920,
+    "clientHeight": 1440
+  },
+  "F2": {
+    "x": 1365,
+    "y": 1249,
     "width": 1,
     "height": 1,
     "selected": true,
@@ -127,7 +145,7 @@
   },
   "HP": {
     "x": 1270,
-    "y": 1247,
+    "y": 1246,
     "width": 1,
     "height": 1,
     "selected": true,
