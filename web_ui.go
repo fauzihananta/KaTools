@@ -1139,7 +1139,7 @@ body.click-input-mode #deathROIInfo, body.click-input-mode #deathROIPreview { di
 					<div class="roi-picker-title">Party target click point</div>
 					<div class="click-area-controls" id="clickAreaControlsChatParty"><span class="click-area-status" id="clickAreaStatusChatParty">Area not set</span><div class="click-area-buttons"><button type="button" onclick="openClickSkillPicker('ChatParty')">SET PARTY POINT</button><button type="button" id="clickAreaResetChatParty" onclick="resetClickSkillArea('ChatParty')">RESET</button></div></div>
 					<label for="chatTextClickYOffset">Click below detected text (px)</label>
-					<input type="number" class="numeric-input" id="chatTextClickYOffset" min="0" max="200" step="1" value="45">
+					<input type="number" class="numeric-input" id="chatTextClickYOffset" min="0" max="200" step="1" value="100">
 				</div>
 				<div class="hint">When the phrase is found, KaTools clicks the saved Party point first, then clicks below the floating text to target that character.</div>
 			</div>
@@ -2295,7 +2295,7 @@ function applySavedConfig(config) {
 	document.getElementById("clickWhitelistTargetNames").value = config.clickWhitelistTargetNames || "";
 	document.getElementById("chatTextClickEnabled").checked = !!config.chatTextClickEnabled;
 	document.getElementById("chatTextClickKeyword").value = config.chatTextClickKeyword || "";
-	document.getElementById("chatTextClickYOffset").value = config.chatTextClickYOffset || 45;
+	document.getElementById("chatTextClickYOffset").value = config.chatTextClickYOffset || 100;
 	setTargetMode(config.targetUntilDeadEnabled ? "until" : (config.targetEnabled ? "normal" : "assist"));
 	setTargetUntilRole(config.targetUntilDeadSupport ? "support" : "attacker");
 	document.getElementById("assistSkillSlot").value = config.assistSkillVK || "0";
