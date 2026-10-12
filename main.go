@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/binary"
 	"fmt"
 	"image"
@@ -76,6 +77,11 @@ const (
 	vkReturn = 0x0D
 )
 
+// Each capture generation gets its own mapping. The old fixed mapping name
+// allowed a slow-to-exit helper to race a newly started helper and corrupt the
+// frames seen by the OCR loops.
+var wgcCaptureSequence atomic.Uint64
+
 type SharedFrameHeader struct {
 	Magic         uint32
 	Width         uint32
@@ -148,6 +154,10 @@ func main() {
 	fmt.Println()
 
 	runtimeManager := NewRuntimeManager()
+	accessController := NewAccessController()
+	runtimeManager.SetAccessController(accessController)
+	accessController.SetOnRevoked(runtimeManager.Stop)
+	accessController.Start(context.Background())
 	globalRuntimeManager = runtimeManager
 	SetHotkeyRuntimeManager(runtimeManager)
 	RunHotkeyServer()
@@ -182,6 +192,11 @@ func enablePerMonitorDPIAwareness() {
 type RuntimeManager struct {
 	mu sync.RWMutex
 
+	// access is optional so focused runtime tests and development tools can
+	// construct a manager without a live policy endpoint. The desktop entry
+	// point always installs one before exposing the UI.
+	access *AccessController
+
 	// activeControl is the lock-free emergency lane used by UI Stop and the
 	// global hotkey. It contains only immutable pointers for one runtime
 	// generation, so cancellation never waits for RuntimeManager.mu, OCR, a
@@ -193,7 +208,7 @@ type RuntimeManager struct {
 
 	hwnd uintptr
 
-	wgcCmd *exec.Cmd
+	wgc *wgcCaptureProcess
 
 	mapping windows.Handle
 	memory  uintptr
@@ -229,7 +244,7 @@ type RuntimeManager struct {
 type runtimeControl struct {
 	stopCh      chan struct{}
 	bot         *BotController
-	wgcCmd      *exec.Cmd
+	wgc         *wgcCaptureProcess
 	requestOnce sync.Once
 }
 
@@ -247,14 +262,92 @@ func (c *runtimeControl) requestStop() {
 		if c.bot != nil {
 			c.bot.RequestStop()
 		}
-		if c.wgcCmd != nil && c.wgcCmd.Process != nil {
-			go func() { _ = c.wgcCmd.Process.Kill() }()
+		if c.wgc != nil {
+			go c.wgc.stop()
+		}
+	})
+}
+
+// wgcCaptureProcess owns both the helper and its Windows Job Object. A job
+// makes termination authoritative even if the helper later gains child
+// processes, while the done channel gives Start a real exit barrier instead
+// of assuming Process.Kill has completed.
+type wgcCaptureProcess struct {
+	cmd         *exec.Cmd
+	job         windows.Handle
+	mappingName string
+	done        chan struct{}
+
+	stopOnce  sync.Once
+	closeOnce sync.Once
+	jobMu     sync.Mutex
+	waitMu    sync.RWMutex
+	waitErr   error
+}
+
+func (p *wgcCaptureProcess) stop() {
+	if p == nil {
+		return
+	}
+	p.stopOnce.Do(func() {
+		p.jobMu.Lock()
+		job := p.job
+		p.jobMu.Unlock()
+		if job != 0 {
+			_ = windows.TerminateJobObject(job, 1)
+			return
+		}
+		if p.cmd != nil && p.cmd.Process != nil {
+			_ = p.cmd.Process.Kill()
+		}
+	})
+}
+
+func (p *wgcCaptureProcess) waitError() error {
+	p.waitMu.RLock()
+	defer p.waitMu.RUnlock()
+	return p.waitErr
+}
+
+func (p *wgcCaptureProcess) releaseJob() {
+	if p == nil {
+		return
+	}
+	p.closeOnce.Do(func() {
+		p.jobMu.Lock()
+		job := p.job
+		p.job = 0
+		p.jobMu.Unlock()
+		if job != 0 {
+			_ = windows.CloseHandle(job)
 		}
 	})
 }
 
 func NewRuntimeManager() *RuntimeManager {
 	return &RuntimeManager{}
+}
+
+func (m *RuntimeManager) SetAccessController(access *AccessController) {
+	if m == nil {
+		return
+	}
+	m.mu.Lock()
+	m.access = access
+	m.mu.Unlock()
+}
+
+func (m *RuntimeManager) accessStatus() AccessStatus {
+	if m == nil {
+		return AccessStatus{Allowed: false, Message: "Runtime is unavailable."}
+	}
+	m.mu.RLock()
+	access := m.access
+	m.mu.RUnlock()
+	if access == nil {
+		return AccessStatus{Allowed: true, Message: "Access control is not configured."}
+	}
+	return access.Status()
 }
 
 // captureFPSForConfig keeps the always-on disconnect safeguard inexpensive
@@ -292,6 +385,13 @@ func (m *RuntimeManager) Start(
 	hwnd uintptr,
 	cfg WebBotConfig,
 ) error {
+	if access := m.accessStatus(); !access.Allowed {
+		message := strings.TrimSpace(access.Message)
+		if message == "" {
+			message = "Online access has not been approved."
+		}
+		return fmt.Errorf("KaTools is disabled: %s", message)
+	}
 
 	m.mu.Lock()
 
@@ -359,7 +459,7 @@ func (m *RuntimeManager) Start(
 	// ========================================================
 
 	captureFPS := captureFPSForConfig(cfg)
-	wgcCmd, err := startWGCCapture(hwnd, captureFPS)
+	wgc, err := startWGCCapture(hwnd, captureFPS)
 
 	if err != nil {
 		return err
@@ -367,7 +467,7 @@ func (m *RuntimeManager) Start(
 
 	stopCh := make(chan struct{})
 	doneCh := make(chan struct{})
-	control := &runtimeControl{stopCh: stopCh, bot: bot, wgcCmd: wgcCmd}
+	control := &runtimeControl{stopCh: stopCh, bot: bot, wgc: wgc}
 	m.activeControl.Store(control)
 	runtimePublished := false
 	defer func() {
@@ -375,10 +475,14 @@ func (m *RuntimeManager) Start(
 			return
 		}
 		control.requestStop()
+		// Do not let a failed/cancelled startup release the Start barrier while
+		// its helper still owns GPU capture resources.
+		<-wgc.done
+		wgc.releaseJob()
 		m.activeControl.CompareAndSwap(control, nil)
 		m.mu.Lock()
 		if m.stopCh == stopCh {
-			m.wgcCmd = nil
+			m.wgc = nil
 			m.hwnd = 0
 			m.stopCh = nil
 			m.doneCh = nil
@@ -391,7 +495,7 @@ func (m *RuntimeManager) Start(
 
 	m.mu.Lock()
 
-	m.wgcCmd = wgcCmd
+	m.wgc = wgc
 	m.hwnd = hwnd
 	m.stopCh = stopCh
 	m.doneCh = doneCh
@@ -405,14 +509,13 @@ func (m *RuntimeManager) Start(
 	mapping, err :=
 		waitForSharedMemoryWithStop(
 			stopCh,
+			wgc,
 			15*time.Second,
 		)
 
 	if err != nil {
 
-		if wgcCmd.Process != nil {
-			_ = wgcCmd.Process.Kill()
-		}
+		wgc.stop()
 
 		return fmt.Errorf(
 			"waiting for WGC shared memory failed: %w",
@@ -437,9 +540,7 @@ func (m *RuntimeManager) Start(
 
 		_ = windows.CloseHandle(mapping)
 
-		if wgcCmd.Process != nil {
-			_ = wgcCmd.Process.Kill()
-		}
+		wgc.stop()
 
 		return fmt.Errorf(
 			"MapViewOfFile failed: %w",
@@ -456,9 +557,7 @@ func (m *RuntimeManager) Start(
 		_ = windows.UnmapViewOfFile(base)
 		_ = windows.CloseHandle(mapping)
 
-		if wgcCmd.Process != nil {
-			_ = wgcCmd.Process.Kill()
-		}
+		wgc.stop()
 
 		return fmt.Errorf(
 			"invalid shared memory magic: 0x%X",
@@ -474,9 +573,7 @@ func (m *RuntimeManager) Start(
 		_ = windows.UnmapViewOfFile(base)
 		_ = windows.CloseHandle(mapping)
 
-		if wgcCmd.Process != nil {
-			_ = wgcCmd.Process.Kill()
-		}
+		wgc.stop()
 
 		return fmt.Errorf(
 			"invalid WGC frame header",
@@ -511,9 +608,7 @@ func (m *RuntimeManager) Start(
 		_ = windows.UnmapViewOfFile(base)
 		_ = windows.CloseHandle(mapping)
 
-		if wgcCmd.Process != nil {
-			_ = wgcCmd.Process.Kill()
-		}
+		wgc.stop()
 
 		return fmt.Errorf(
 			"GetWindowRect failed: %w",
@@ -543,9 +638,7 @@ func (m *RuntimeManager) Start(
 		_ = windows.UnmapViewOfFile(base)
 		_ = windows.CloseHandle(mapping)
 
-		if wgcCmd.Process != nil {
-			_ = wgcCmd.Process.Kill()
-		}
+		wgc.stop()
 
 		return fmt.Errorf(
 			"selected window has invalid size",
@@ -560,9 +653,7 @@ func (m *RuntimeManager) Start(
 	if err != nil {
 		_ = windows.UnmapViewOfFile(base)
 		_ = windows.CloseHandle(mapping)
-		if wgcCmd.Process != nil {
-			_ = wgcCmd.Process.Kill()
-		}
+		wgc.stop()
 		return fmt.Errorf("GetClientRect failed: %w", err)
 	}
 	clientWidth := int(clientRect.Right - clientRect.Left)
@@ -576,9 +667,7 @@ func (m *RuntimeManager) Start(
 	if err != nil {
 		_ = windows.UnmapViewOfFile(base)
 		_ = windows.CloseHandle(mapping)
-		if wgcCmd.Process != nil {
-			_ = wgcCmd.Process.Kill()
-		}
+		wgc.stop()
 		return fmt.Errorf("WGC coordinate mapping failed: %w", err)
 	}
 
@@ -590,16 +679,14 @@ func (m *RuntimeManager) Start(
 	// ========================================================
 
 	m.mu.Lock()
-	if m.stopping || m.stopRequested.Load() {
+	if m.stopping || m.stopRequested.Load() || (m.access != nil && !m.access.Allowed()) {
 		m.mu.Unlock()
 		control.requestStop()
 		m.activeControl.CompareAndSwap(control, nil)
 		_ = windows.UnmapViewOfFile(base)
 		_ = windows.CloseHandle(mapping)
-		if wgcCmd.Process != nil {
-			_ = wgcCmd.Process.Kill()
-		}
-		return fmt.Errorf("KaTools startup was cancelled")
+		wgc.stop()
+		return fmt.Errorf("KaTools startup was cancelled or online access was revoked")
 	}
 
 	m.mapping = mapping
@@ -785,7 +872,7 @@ func (m *RuntimeManager) finishStop(stopSignaled chan<- struct{}) {
 	bot := m.bot
 	autoAccept := m.autoAccept
 	autoPot := m.autoPot
-	wgcCmd := m.wgcCmd
+	wgc := m.wgc
 
 	mapping := m.mapping
 	memory := m.memory
@@ -802,7 +889,7 @@ func (m *RuntimeManager) finishStop(stopSignaled chan<- struct{}) {
 	m.emergency = nil
 	m.deathPause = nil
 	m.targetUntil = nil
-	m.wgcCmd = nil
+	m.wgc = nil
 
 	m.mapping = 0
 	m.memory = 0
@@ -846,11 +933,11 @@ func (m *RuntimeManager) finishStop(stopSignaled chan<- struct{}) {
 	// ========================================================
 	// Stop WGC Immediately
 	// ========================================================
-	// Kill WGC at millisecond 0 so it terminates in parallel with the bot
+	// Stop WGC at millisecond 0 so it terminates in parallel with the bot
 	// and detector teardown, rather than waiting up to 1-2 seconds behind
 	// doneCh and bot.Stop().
-	if wgcCmd != nil && wgcCmd.Process != nil {
-		_ = wgcCmd.Process.Kill()
+	if wgc != nil {
+		wgc.stop()
 	}
 
 	// ========================================================
@@ -914,16 +1001,12 @@ func (m *RuntimeManager) finishStop(stopSignaled chan<- struct{}) {
 	// Reclaim WGC Process
 	// ========================================================
 
-	if wgcCmd != nil && wgcCmd.Process != nil {
-		waitCh := make(chan struct{})
-		go func() {
-			_ = wgcCmd.Wait()
-			close(waitCh)
-		}()
-		select {
-		case <-waitCh:
-		case <-time.After(500 * time.Millisecond):
-		}
+	if wgc != nil {
+		// A new Start must not overlap this capture generation. The helper is
+		// already being reaped by its owner goroutine, so waiting here cannot
+		// race a second Cmd.Wait call.
+		<-wgc.done
+		wgc.releaseJob()
 		fmt.Println("[WGC] Stopped.")
 	}
 	if control != nil {
@@ -943,7 +1026,12 @@ func (m *RuntimeManager) Status() map[string]interface{} {
 	hwnd := m.hwnd
 	bot := m.bot
 	autoPot := m.autoPot
+	access := m.access
 	m.mu.RUnlock()
+	accessStatus := AccessStatus{Allowed: true, Message: "Access control is not configured."}
+	if access != nil {
+		accessStatus = access.Status()
+	}
 
 	running := m.runningFlag.Load()
 	starting := m.startingFlag.Load()
@@ -987,6 +1075,7 @@ func (m *RuntimeManager) Status() map[string]interface{} {
 		"paused":     running && !botRunning,
 
 		"autoPot": autoPotStatus,
+		"access":  accessStatus,
 	}
 }
 
@@ -1112,28 +1201,11 @@ func (m *RuntimeManager) IsRunning() bool {
 }
 
 // ToggleFromHotkey keeps the global hotkey independent from the click and key
-// workers. Death Pause stops only BotController while capture/OCR remains
-// active; an explicit Alt+F12 in that state resumes the existing bot directly
-// instead of first tearing down and rebuilding the whole runtime.
+// workers. While a runtime exists, Alt+F12 always means Stop--including while
+// BotController is paused after death detection. Starting again requires a
+// separate Alt+F12 after runtime teardown has completed.
 func (m *RuntimeManager) ToggleFromHotkey() string {
 	running := m.runningFlag.Load()
-	control := m.activeControl.Load()
-	var bot *BotController
-	if control != nil {
-		bot = control.bot
-	}
-	if running && bot != nil && !bot.IsRunning() {
-		if !m.stopRequested.Load() {
-			bot.Start()
-			if bot.IsRunning() && !m.stopRequested.Load() {
-				appendOCRLog("HOTKEY RESUME | Bot resumed without restarting capture")
-				return "resumed"
-			}
-			return "resume failed"
-		}
-		return "stop in progress"
-	}
-
 	if running {
 		m.Stop()
 		return "stopped"
@@ -1307,6 +1379,7 @@ func getWindowTitle(
 
 func waitForSharedMemoryWithStop(
 	stopCh <-chan struct{},
+	wgc *wgcCaptureProcess,
 	timeout time.Duration,
 ) (windows.Handle, error) {
 
@@ -1321,12 +1394,17 @@ func waitForSharedMemoryWithStop(
 			return 0, fmt.Errorf(
 				"runtime stopped",
 			)
+		case <-wgc.done:
+			return 0, fmt.Errorf(
+				"wgc_capture.exe exited before its frame buffer became ready: %v",
+				wgc.waitError(),
+			)
 
 		default:
 		}
 
 		handle, err :=
-			openSharedMemory()
+			openSharedMemory(wgc.mappingName)
 
 		if err == nil {
 			return handle, nil
@@ -1693,6 +1771,10 @@ func runPicker(
 		keyword                             string
 		yOffset                             int
 		match                               *ocrworker.TextMatch
+		anchorText                          string
+		pointValid                          bool
+		fallbackClientX, fallbackClientY    int
+		fallbackPointValid                  bool
 		recognizedText                      string
 		clientX, clientY                    int
 		referenceWidth, referenceHeight     int
@@ -2244,6 +2326,22 @@ func runPicker(
 					chatTextLatched = false
 					break
 				}
+				if !event.pointValid {
+					appendOCRLog("CHAT TEXT CLICK BLOCKED | Invalid client point | Keyword=%q | Match=%q | Scan=%d,%d %dx%d | Scale=%.4f,%.4f | Offset=%d,%d", keyword, event.match.Text, event.scanX, event.scanY, event.scanWidth, event.scanHeight, event.scaleX, event.scaleY, event.offsetX, event.offsetY)
+					break
+				}
+				clickAreas := LoadClickSkillROIs()
+				if slot, collision := chatTextCombatPointCollision(event.clientX, event.clientY, event.referenceWidth, event.referenceHeight, clickAreas); collision {
+					fallbackSlot, fallbackCollision := chatTextCombatPointCollision(event.fallbackClientX, event.fallbackClientY, event.referenceWidth, event.referenceHeight, clickAreas)
+					if event.fallbackPointValid && !fallbackCollision {
+						appendOCRLog("CHAT TEXT CLICK SAFETY | Offset point %d,%d overlaps combat slot %s | Using character-name point %d,%d", event.clientX, event.clientY, slot, event.fallbackClientX, event.fallbackClientY)
+						event.clientX, event.clientY = event.fallbackClientX, event.fallbackClientY
+					} else {
+						appendOCRLog("CHAT TEXT CLICK BLOCKED | Character point overlaps combat slot %s | Point=%d,%d in %dx%d | Fallback=%d,%d valid=%t collision=%q | Keyword=%q | Anchor=%q", slot, event.clientX, event.clientY, event.referenceWidth, event.referenceHeight, event.fallbackClientX, event.fallbackClientY, event.fallbackPointValid, fallbackSlot, keyword, event.anchorText)
+						break
+					}
+				}
+				appendOCRLog("CHAT TEXT CLICK REQUEST | Keyword=%q | Match=%q | Anchor=%q | PartyPoint=%d,%d | CharacterPoint=%d,%d in %dx%d | YOffset=%d | Scale=%.4f,%.4f | CaptureOffset=%d,%d", keyword, event.match.Text, event.anchorText, partyArea.X+partyArea.Width/2, partyArea.Y+partyArea.Height/2, event.clientX, event.clientY, event.referenceWidth, event.referenceHeight, event.yOffset, event.scaleX, event.scaleY, event.offsetX, event.offsetY)
 				chatTextClickBusy = true
 				go func(event chatTextEvent, keyword string, partyArea ClickSkillROI) {
 					ok := bot.CastClickAction2(
@@ -2252,17 +2350,14 @@ func runPicker(
 						event.clientX, event.clientY, event.referenceWidth, event.referenceHeight,
 					)
 					if !ok {
+						appendOCRLog("CHAT TEXT FLOW FAILED | Keyword=%q | PartyPoint=%d,%d | CharacterPoint=%d,%d", keyword, partyArea.X+partyArea.Width/2, partyArea.Y+partyArea.Height/2, event.clientX, event.clientY)
 						select {
 						case chatTextClickDoneCh <- false:
 						case <-stopCh:
 						}
 						return
 					}
-					anchorText := "bubble"
-					if event.match.FollowingLine != nil {
-						anchorText = event.match.FollowingLine.Text
-					}
-					appendOCRLog("CHAT TEXT FLOW | Keyword=%q | Match=%q | Anchor=%q | PartyPoint=%d,%d | CharacterPoint=%d,%d | YOffset=%d | Confidence=%.1f", keyword, event.match.Text, anchorText, partyArea.X+partyArea.Width/2, partyArea.Y+partyArea.Height/2, event.clientX, event.clientY, event.yOffset, event.match.Confidence)
+					appendOCRLog("CHAT TEXT FLOW | Keyword=%q | Match=%q | Anchor=%q | PartyPoint=%d,%d | CharacterPoint=%d,%d | YOffset=%d | Confidence=%.1f", keyword, event.match.Text, event.anchorText, partyArea.X+partyArea.Width/2, partyArea.Y+partyArea.Height/2, event.clientX, event.clientY, event.yOffset, event.match.Confidence)
 					select {
 					case chatTextClickDoneCh <- true:
 					case <-stopCh:
@@ -2556,8 +2651,8 @@ func runPicker(
 				} else {
 					sent = pressEnterToWindow(uintptr(hwnd))
 				}
-				if sent && deathPause.MarkResurrectionAccepted() {
-					appendOCRLog("AUTO RESU | Resurrection prompt verified | Input=%s sent | Waiting for HP", method)
+				if sent && deathPause.MarkResurrectionAttempted() {
+					appendOCRLog("AUTO RESU | Resurrection prompt verified | Input=%s attempt sent | Waiting for dialog confirmation; will retry if still visible", method)
 				} else {
 					appendOCRLog("AUTO RESU | Resurrection prompt verified | Input=%s failed | Waiting", method)
 				}
@@ -2964,29 +3059,40 @@ func runPicker(
 				lastChatTextScanAt = time.Now()
 				if ok {
 					chatTextOCRBusy = true
-					go func(img image.Image, keyword string, yOffset int, roi ocrworker.PartyROIConfig, offsetX, offsetY, refW, refH, scanX, scanY, frameWidth, frameHeight, originX, originY int, scaleX, scaleY float64) {
+					go func(img image.Image, keyword string, yOffset int, roi ocrworker.PartyROIConfig, offsetX, offsetY, refW, refH, scanX, scanY, scanWidth, scanHeight, frameWidth, frameHeight, originX, originY int, scaleX, scaleY float64) {
 						match, recognizedText, err := chatTextOCR.FindTextBoxDetailed(img, keyword)
 						event := chatTextEvent{
 							keyword: keyword, yOffset: yOffset, match: match, recognizedText: recognizedText, err: err,
 							referenceWidth: refW, referenceHeight: refH,
-							scanX: scanX, scanY: scanY, scanWidth: roi.Width, scanHeight: roi.Height,
+							scanX: scanX, scanY: scanY, scanWidth: scanWidth, scanHeight: scanHeight,
 							frameWidth: frameWidth, frameHeight: frameHeight, scaleX: scaleX, scaleY: scaleY,
 							originX: originX, originY: originY, offsetX: offsetX, offsetY: offsetY,
 						}
 						if match != nil {
-							anchorX := match.X + match.Width/2
-							if match.FollowingLine != nil {
-								anchorX = match.FollowingLine.X + match.FollowingLine.Width/2
-							}
-							event.clientX = roi.X + int(float64(anchorX)/scaleX) - int(float64(offsetX)/scaleX)
-							event.clientY = roi.Y + int(float64(match.Y+match.Height/2)/scaleY) - int(float64(offsetY)/scaleY) + yOffset
+							event.clientX, event.clientY, event.anchorText, event.pointValid = chatTextMatchClientPoint(
+								roi,
+								match,
+								scaleX,
+								scaleY,
+								yOffset,
+								refW,
+								refH,
+							)
+							event.fallbackClientX, event.fallbackClientY, event.fallbackPointValid = chatTextFollowingLineClientPoint(
+								roi,
+								match,
+								scaleX,
+								scaleY,
+								refW,
+								refH,
+							)
 						}
 						select {
 						case chatTextResultCh <- event:
 						case <-stopCh:
 						}
 					}(img, chatKeyword, chatYOffset, picked.ROI, captureOffsetX, captureOffsetY, picked.ClientWidth, picked.ClientHeight,
-						scanX, scanY, reader.width, reader.height, frameOriginX, frameOriginY, scaleX, scaleY)
+						scanX, scanY, roi.Width, roi.Height, reader.width, reader.height, frameOriginX, frameOriginY, scaleX, scaleY)
 				} else {
 					logChatTextDiagnostic("CHAT TEXT SCAN | capture failed | ROI=%d,%d %dx%d | Offset=%d,%d", roi.X, roi.Y, roi.Width, roi.Height, captureOffsetX, captureOffsetY)
 				}
@@ -3706,7 +3812,7 @@ func waitForSharedMemory() (
 	for {
 
 		handle, err :=
-			openSharedMemory()
+			openSharedMemory(sharedMemoryName)
 
 		if err == nil {
 			return handle, nil
@@ -3726,7 +3832,7 @@ func waitForSharedMemory() (
 // OPEN FILE MAPPING
 // ============================================================
 
-func openSharedMemory() (
+func openSharedMemory(mappingName string) (
 	windows.Handle,
 	error,
 ) {
@@ -3743,7 +3849,7 @@ func openSharedMemory() (
 
 	name, err :=
 		windows.UTF16PtrFromString(
-			sharedMemoryName,
+			mappingName,
 		)
 
 	if err != nil {
@@ -3876,7 +3982,7 @@ func readBytes(
 func startWGCCapture(
 	hwnd uintptr,
 	captureFPS int,
-) (*exec.Cmd, error) {
+) (*wgcCaptureProcess, error) {
 
 	exePath, err :=
 		os.Executable()
@@ -3946,6 +4052,11 @@ func startWGCCapture(
 	if captureFPS > 10 {
 		captureFPS = 10
 	}
+	mappingName := fmt.Sprintf(
+		`Local\KaToolsKathanaFrameV3-%d-%d`,
+		os.Getpid(),
+		wgcCaptureSequence.Add(1),
+	)
 
 	cmd :=
 		exec.Command(
@@ -3954,6 +4065,8 @@ func startWGCCapture(
 			hwndArg,
 			"--fps",
 			strconv.Itoa(captureFPS),
+			"--mapping-name",
+			mappingName,
 		)
 
 	cmd.SysProcAttr =
@@ -3974,12 +4087,52 @@ func startWGCCapture(
 			)
 	}
 
+	var job windows.Handle
+	job, jobErr := windows.CreateJobObject(nil, nil)
+	if jobErr == nil {
+		process, openErr := windows.OpenProcess(
+			windows.PROCESS_SET_QUOTA|windows.PROCESS_TERMINATE,
+			false,
+			uint32(cmd.Process.Pid),
+		)
+		if openErr == nil {
+			jobErr = windows.AssignProcessToJobObject(job, process)
+			_ = windows.CloseHandle(process)
+		} else {
+			jobErr = openErr
+		}
+	}
+	if jobErr != nil {
+		// Some managed Windows environments forbid assigning a child to a job.
+		// Direct TerminateProcess remains a safe fallback; the unique mapping and
+		// exit barrier still prevent a second runtime from using stale frames.
+		if job != 0 {
+			_ = windows.CloseHandle(job)
+			job = 0
+		}
+		fmt.Printf("[WGC] Job guard unavailable; using direct process stop: %v\n", jobErr)
+	}
+
+	wgc := &wgcCaptureProcess{
+		cmd:         cmd,
+		job:         job,
+		mappingName: mappingName,
+		done:        make(chan struct{}),
+	}
+	go func() {
+		err := cmd.Wait()
+		wgc.waitMu.Lock()
+		wgc.waitErr = err
+		wgc.waitMu.Unlock()
+		close(wgc.done)
+	}()
+
 	fmt.Printf(
 		"[WGC] Started successfully. PID=%d\n",
 		cmd.Process.Pid,
 	)
 
-	return cmd, nil
+	return wgc, nil
 }
 
 // ============================================================

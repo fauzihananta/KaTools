@@ -67,6 +67,35 @@ Stop bot terlebih dahulu bila ingin mengganti jendela game.
 
 Tombol **SAVE CONFIG** menyimpan preset pengaturan untuk dipakai lagi nanti.
 
+## Online access per rilis
+
+KaTools membaca allow-list dari `katools_access.json` di branch `main` GitHub.
+File tersebut **tidak perlu ikut didistribusikan** bersama EXE; setelah mengubahnya,
+commit dan push file itu ke GitHub agar aplikasi menerima kebijakan baru pada cek
+berikutnya.
+
+```json
+{
+  "refreshEveryHours": 24,
+  "offlineGraceHours": 6,
+  "allowedReleaseIDs": [
+    "2026FreeVersion",
+    "6d39619b-7c97-4a22-9789-d0c18dec9eac"
+  ]
+}
+```
+
+Build biasa memakai ID Free `2026FreeVersion`. Untuk build Premium, tanam UUID
+yang diizinkan saat proses build:
+
+```powershell
+go build -ldflags "-X main.releaseID=6d39619b-7c97-4a22-9789-d0c18dec9eac" -o KaTools_Premium.exe .
+```
+
+Menghapus UUID dari `allowedReleaseIDs` menonaktifkan EXE dengan UUID tersebut
+pada cek berikutnya. Untuk mengganti Premium yang bocor, hapus UUID lama,
+build ulang dengan UUID baru, lalu tambahkan UUID baru itu ke allow-list.
+
 ## Jika ada masalah
 
 - Pastikan game memakai bahasa **English**.

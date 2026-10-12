@@ -27,8 +27,13 @@ using Microsoft::WRL::Wrappers::HStringReference;
 // Shared Memory
 // ============================================================
 
-static const wchar_t* SHARED_MEMORY_NAME =
+static const wchar_t* DEFAULT_SHARED_MEMORY_NAME =
     L"Local\\KaToolsKathanaFrameV2";
+
+// WGC is expensive on low-end GPUs and the frame buffer is single-writer.
+// Never allow two helpers from separate starts to fight over either resource.
+static const wchar_t* CAPTURE_MUTEX_NAME =
+    L"Local\\KaToolsKathanaCaptureLockV1";
 
 static const uint32_t SHARED_MEMORY_MAGIC =
     0x4B544652; // "KTFR"
@@ -110,7 +115,8 @@ struct SharedMemoryContext
 bool CreateSharedMemory(
     SharedMemoryContext& shm,
     uint32_t width,
-    uint32_t height
+    uint32_t height,
+    const wchar_t* mappingName
 )
 {
     memset(
@@ -184,7 +190,7 @@ bool CreateSharedMemory(
         PAGE_READWRITE,
         sizeHigh,
         sizeLow,
-        SHARED_MEMORY_NAME
+        mappingName
     );
 
 if (!shm.mapping)
@@ -448,7 +454,8 @@ bool CaptureWindow(
     HWND hwnd,
     ID3D11Device* device,
     ID3D11DeviceContext* context,
-    DWORD captureFPS
+    DWORD captureFPS,
+    const wchar_t* mappingName
 )
 {
     const DWORD frameIntervalMs = 1000 / captureFPS;
@@ -741,7 +748,8 @@ bool CaptureWindow(
         ),
         static_cast<uint32_t>(
             size.Height
-        )
+        ),
+        mappingName
     ))
     {
         return false;
@@ -1172,6 +1180,28 @@ DWORD ParseCaptureFPS(
     return DEFAULT_CAPTURE_FPS;
 }
 
+std::wstring ParseMappingName(
+    int argc,
+    char* argv[]
+)
+{
+    for (int i = 1; i < argc; ++i)
+    {
+        if (
+            std::string(argv[i]) == "--mapping-name" &&
+            i + 1 < argc
+        )
+        {
+            const std::string value = argv[++i];
+            // The launcher deliberately emits an ASCII Local\\ name, so this
+            // conversion is lossless and keeps the helper dependency-free.
+            return std::wstring(value.begin(), value.end());
+        }
+    }
+
+    return DEFAULT_SHARED_MEMORY_NAME;
+}
+
 
 int main(
     int argc,
@@ -1199,6 +1229,7 @@ int main(
 
     HWND hwnd = nullptr;
     const DWORD captureFPS = ParseCaptureFPS(argc, argv);
+    const std::wstring mappingName = ParseMappingName(argc, argv);
 
     if (!ParseHWND(
         argc,
@@ -1227,6 +1258,32 @@ int main(
             << std::endl;
 
         return 1;
+    }
+
+    HANDLE captureMutex = CreateMutexW(
+        nullptr,
+        FALSE,
+        CAPTURE_MUTEX_NAME
+    );
+
+    if (!captureMutex)
+    {
+        std::cout
+            << "CreateMutexW failed: "
+            << GetLastError()
+            << std::endl;
+
+        return 1;
+    }
+
+    if (GetLastError() == ERROR_ALREADY_EXISTS)
+    {
+        std::cout
+            << "Another WGC capture is still active; refusing a second helper."
+            << std::endl;
+
+        CloseHandle(captureMutex);
+        return 2;
     }
 
     wchar_t title[512] = {};
@@ -1352,8 +1409,11 @@ int main(
             hwnd,
             device.Get(),
             context.Get(),
-            captureFPS
+            captureFPS,
+            mappingName.c_str()
         );
+
+    CloseHandle(captureMutex);
 
     if (!result)
     {

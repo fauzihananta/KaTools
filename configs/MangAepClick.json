@@ -12,7 +12,7 @@
   "clickWhitelistMode": false,
   "clickWhitelistTargetNames": "Choniokusin",
   "chatTextClickEnabled": false,
-  "chatTextClickKeyword": "party bro",
+  "chatTextClickKeyword": "hidup jokowi",
   "chatTextClickYOffset": 100,
   "targetEnabled": false,
   "inputMethod": "click",
@@ -115,7 +115,7 @@
     {
       "name": "8",
       "vk": 56,
-      "enabled": true,
+      "enabled": false,
       "delay": 181,
       "targetSearch": false
     },

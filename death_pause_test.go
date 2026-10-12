@@ -39,11 +39,17 @@ func TestDeathPauseResumesOnlyAfterConfirmedHealthyHP(t *testing.T) {
 	if p.ObserveHPPercent(100, true, 70) {
 		t.Fatal("full HP behind a visible death dialog must not resume the bot")
 	}
-	if !p.MarkResurrectionAccepted() {
-		t.Fatal("resurrection acceptance was not recorded")
+	if !p.MarkResurrectionAttempted() {
+		t.Fatal("resurrection attempt was not recorded")
+	}
+	if !p.ShouldScanResurrection() {
+		t.Fatal("input delivery was incorrectly treated as confirmed resurrection")
 	}
 	p.ObserveDeathDialog(false)
 	p.ObserveDeathDialog(false)
+	if p.ShouldScanResurrection() {
+		t.Fatal("resurrection scanning continued after the dialog disappearance was confirmed")
+	}
 	if !p.ShouldWatchHP() {
 		t.Fatal("HP watching did not begin after the death dialog disappeared")
 	}
@@ -93,6 +99,33 @@ func TestResurrectionPromptNeedsTwoForegroundScans(t *testing.T) {
 	p.ObserveResurrectionPrompt(false)
 	if p.ObserveResurrectionPrompt(true) {
 		t.Fatal("a missing scan must reset resurrection confirmation")
+	}
+}
+
+func TestIgnoredResurrectionClickIsRetried(t *testing.T) {
+	p := NewDeathPauseController(true, true)
+	if !p.TriggerOnce() {
+		t.Fatal("death state was not entered")
+	}
+	p.ObserveDeathDialog(true)
+	if p.ObserveResurrectionPrompt(true) || !p.ObserveResurrectionPrompt(true) {
+		t.Fatal("initial resurrection prompt was not confirmed on its second scan")
+	}
+	if !p.MarkResurrectionAttempted() {
+		t.Fatal("resurrection attempt was not recorded")
+	}
+
+	// A successful Windows message is not proof that the game consumed it. If
+	// the same foreground dialog remains, require two fresh scans and retry.
+	p.ObserveDeathDialog(true)
+	if !p.ShouldScanResurrection() {
+		t.Fatal("visible dialog stopped resurrection monitoring after an unverified click")
+	}
+	if p.ObserveResurrectionPrompt(true) {
+		t.Fatal("retry was authorized without a fresh two-scan confirmation")
+	}
+	if !p.ObserveResurrectionPrompt(true) {
+		t.Fatal("ignored resurrection click was not authorized for retry")
 	}
 }
 

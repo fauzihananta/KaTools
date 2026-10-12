@@ -10,10 +10,10 @@ import (
 
 const autoPotCooldown = 1200 * time.Millisecond
 
-// Low-level characters can legitimately have small HP/TP maxima (for example
-// 50/50 HP and 30/30 TP). Keep a floor to reject OCR noise while allowing
-// those real early-game values.
-const minimumStatusMaximum = 20
+// Values below 100 are treated as OCR noise. In practice a full 1756/1756 bar
+// has been misread as 65/65; accepting that false maximum can trigger potions
+// continuously even though the character is actually full.
+const minimumStatusMaximum = 100
 const statusOCRBarTolerance = 4.0
 const statusOCRBarOverestimateTolerance = 12.0
 
@@ -207,9 +207,6 @@ func statusMaximumPlausible(previous, next int) bool {
 }
 
 func maximumIsCloseEnough(previous, next int) bool {
-	// Use the same lower bound as every other status-validation path. Keeping a
-	// second, higher HP-only floor rejected legitimate early-game values such as
-	// HP 50 and TP 30 even though minimumStatusMaximum explicitly permits them.
 	if next < minimumStatusMaximum {
 		return false
 	}

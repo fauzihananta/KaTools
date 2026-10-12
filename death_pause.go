@@ -14,6 +14,7 @@ type DeathPauseController struct {
 	triggered               bool
 	waitingResurrection     bool
 	resurrectionAccepted    bool
+	resurrectionAttempted   bool
 	resurrectionPromptScans int
 	deathDialogCleared      bool
 	dialogClearScans        int
@@ -62,6 +63,7 @@ func (p *DeathPauseController) TriggerOnce() bool {
 	p.triggered = true
 	p.waitingResurrection = p.autoResurrectEnabled
 	p.resurrectionAccepted = false
+	p.resurrectionAttempted = false
 	p.resurrectionPromptScans = 0
 	p.deathDialogCleared = false
 	p.dialogClearScans = 0
@@ -78,16 +80,20 @@ func (p *DeathPauseController) AutoResurrectEnabled() bool {
 func (p *DeathPauseController) ShouldScanResurrection() bool {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	return p.enabled && p.waitingResurrection && !p.resurrectionAccepted
+	return p.enabled && p.waitingResurrection && !p.resurrectionAccepted && !p.deathDialogCleared
 }
 
-func (p *DeathPauseController) MarkResurrectionAccepted() bool {
+// MarkResurrectionAttempted records only that Windows accepted the input
+// delivery. It deliberately does not mark the resurrection as accepted: games
+// may acknowledge synthetic mouse messages while ignoring the actual click.
+// The visible death dialog must disappear before acceptance is confirmed.
+func (p *DeathPauseController) MarkResurrectionAttempted() bool {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if !p.enabled || !p.waitingResurrection || p.resurrectionAccepted {
+	if !p.enabled || !p.waitingResurrection || p.resurrectionAccepted || p.deathDialogCleared {
 		return false
 	}
-	p.resurrectionAccepted = true
+	p.resurrectionAttempted = true
 	p.resurrectionPromptScans = 0
 	p.healthyScans = 0
 	return true
@@ -143,6 +149,9 @@ func (p *DeathPauseController) ObserveDeathDialog(visible bool) {
 	p.dialogClearScans++
 	if p.dialogClearScans >= deathDialogClearConfirmScans {
 		p.deathDialogCleared = true
+		if p.waitingResurrection && p.resurrectionAttempted {
+			p.resurrectionAccepted = true
+		}
 	}
 }
 
@@ -202,6 +211,7 @@ func (p *DeathPauseController) resetLocked() {
 	p.triggered = false
 	p.waitingResurrection = false
 	p.resurrectionAccepted = false
+	p.resurrectionAttempted = false
 	p.resurrectionPromptScans = 0
 	p.deathDialogCleared = false
 	p.dialogClearScans = 0

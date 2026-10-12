@@ -1,10 +1,10 @@
 {
   "dc": {
     "roi": {
-      "x": 754,
-      "y": 634,
-      "width": 415,
-      "height": 159,
+      "x": 750,
+      "y": 639,
+      "width": 419,
+      "height": 157,
       "selected": true
     },
     "clientWidth": 1920,
@@ -13,10 +13,10 @@
   },
   "death": {
     "roi": {
-      "x": 756,
-      "y": 636,
-      "width": 405,
-      "height": 162,
+      "x": 753,
+      "y": 635,
+      "width": 413,
+      "height": 165,
       "selected": true
     },
     "clientWidth": 1920,
@@ -25,10 +25,10 @@
   },
   "party": {
     "roi": {
-      "x": 756,
+      "x": 752,
       "y": 638,
-      "width": 409,
-      "height": 157,
+      "width": 414,
+      "height": 167,
       "selected": true
     },
     "clientWidth": 1920,

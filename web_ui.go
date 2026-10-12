@@ -193,6 +193,41 @@ body.light-theme {
 .tab-panel { display: none; }
 .tab-panel.active { display: block; }
 
+.scroll-nav {
+  position: fixed;
+  right: 14px;
+  top: 50%;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  transform: translateY(-50%);
+}
+.scroll-nav-button {
+  width: 36px;
+  height: 36px;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--border-active);
+  border-radius: 999px;
+  background: var(--bg-elevated);
+  color: var(--accent-cyan);
+  box-shadow: var(--shadow-card);
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+  transition: var(--transition);
+}
+.scroll-nav-button:hover:not(:disabled) {
+  border-color: var(--accent-cyan);
+  box-shadow: var(--shadow-glow-cyan);
+  transform: scale(1.06);
+}
+.scroll-nav-button:disabled {
+  opacity: 0.28;
+  cursor: default;
+}
+
 .section {
   margin-bottom: 20px;
 }
@@ -871,6 +906,8 @@ button:disabled:hover { transform: none; }
   .click-global-action-area { grid-template-columns: 1fr; }
   .action-card { grid-template-columns: auto minmax(0, 1fr) auto; }
   .config-actions { grid-template-columns: 1fr; }
+  .scroll-nav { right: 7px; }
+  .scroll-nav-button { width: 32px; height: 32px; font-size: 18px; }
 }
 @media (max-width: 540px) {
   body { padding: 10px; }
@@ -1452,6 +1489,11 @@ body.click-input-mode #deathROIInfo, body.click-input-mode #deathROIPreview { di
 
 </div>
 
+<nav class="scroll-nav" aria-label="Page navigation">
+	<button type="button" id="scrollTopButton" class="scroll-nav-button" onclick="scrollPageTo('top')" title="Go to top" aria-label="Go to top">&#8593;</button>
+	<button type="button" id="scrollBottomButton" class="scroll-nav-button" onclick="scrollPageTo('bottom')" title="Go to bottom" aria-label="Go to bottom">&#8595;</button>
+</nav>
+
 
 <script>
 
@@ -1466,8 +1508,26 @@ let botRuntimeActive = false;
 // Keep the first call-to-action simple. Once the bot has run during this page
 // session, the button can advertise the Alt+F12 toggle shortcut instead.
 let botHasStarted = false;
+let onlineAccessAllowed = false;
 let targetROIReady = false;
 let windowsLoading = false;
+
+function scrollPageTo(edge) {
+	const top = edge === "bottom" ? document.documentElement.scrollHeight : 0;
+	window.scrollTo({ top: top, behavior: "smooth" });
+}
+
+function updateScrollNav() {
+	const topButton = document.getElementById("scrollTopButton");
+	const bottomButton = document.getElementById("scrollBottomButton");
+	if (!topButton || !bottomButton) return;
+	topButton.disabled = window.scrollY <= 4;
+	bottomButton.disabled = window.scrollY + window.innerHeight >= document.documentElement.scrollHeight - 4;
+}
+
+window.addEventListener("scroll", updateScrollNav, { passive: true });
+window.addEventListener("resize", updateScrollNav);
+requestAnimationFrame(updateScrollNav);
 
 function showTab(tabName) {
 	for (const panel of document.querySelectorAll(".tab-panel")) {
@@ -2469,6 +2529,25 @@ async function updateStatus() {
 		const info =
 			document.getElementById("windowInfo");
 
+		const access = result.access || {};
+		const accessWasAllowed = onlineAccessAllowed;
+		onlineAccessAllowed = !!access.allowed;
+		if (accessWasAllowed !== onlineAccessAllowed) {
+			updateWindowDependentControls();
+		}
+		if (!onlineAccessAllowed) {
+			botRuntimeActive = false;
+			status.className = "status paused";
+			status.innerHTML = '<span class="status-dot"></span><span>ONLINE ACCESS REQUIRED</span>';
+			button.className = "bot-button start";
+			button.innerText = "ACCESS LOCKED";
+			button.disabled = true;
+			info.innerText = access.message || "KaTools could not verify online access.";
+			const statusRead = document.getElementById("statusReadInfo");
+			if (statusRead) statusRead.innerText = "";
+			return;
+		}
+
 		botRuntimeActive = !!(result.running || result.starting);
 		if (botRuntimeActive) {
 			botHasStarted = true;
@@ -2483,7 +2562,7 @@ async function updateStatus() {
 
 			if (result.paused) {
 				status.className = "status paused";
-				status.innerHTML = '<span class="status-dot"></span><span>● AUTO PAUSED — DEATH DETECTED</span>';
+				status.innerHTML = '<span class="status-dot"></span><span>&#9679; AUTO PAUSED &mdash; DEATH DETECTED &mdash; Alt+F12 to Stop</span>';
 			} else {
 				status.className = "status running";
 				status.innerHTML = '<span class="status-dot"></span><span>● BOT RUNNING — Alt+F12 to Stop</span>';
@@ -2539,7 +2618,7 @@ async function updateStatus() {
 
 
 function hasSelectedTargetWindow() {
-	return !!document.getElementById("windowSelect").value;
+	return onlineAccessAllowed && !!document.getElementById("windowSelect").value;
 }
 
 function updateAppTitle() {
@@ -5016,7 +5095,7 @@ func applyWebBotConfig(
 
 	autoPot.Update(cfg)
 	autoPot.SetClickSender(func(hwnd uintptr, x, y, refW, refH int) bool {
-		return bot.CastClickAction("AutoPot", hwnd, x, y, refW, refH, 0, false)
+		return bot.CastPriorityClickAction("AutoPot", hwnd, x, y, refW, refH)
 	})
 	autoPot.SetKeySender(func(vk uintptr) bool {
 		return bot.CastPriorityKeyAction("AutoPot", vk)

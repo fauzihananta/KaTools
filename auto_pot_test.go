@@ -116,11 +116,22 @@ func TestAutoPotRejectsUnrealisticOCRMaximum(t *testing.T) {
 	}
 }
 
-func TestAutoPotAcceptsLowLevelStatusMaximum(t *testing.T) {
+func TestAutoPotRejectsSub100StatusMaximum(t *testing.T) {
 	p := NewAutoPotController(0, WebBotConfig{})
 	p.Observe(50, 50, 30, 30)
-	if !p.HasStatusMaxima() {
-		t.Fatal("low-level HP/TP maxima were rejected")
+	if p.HasStatusMaxima() {
+		t.Fatal("sub-100 HP/TP OCR maxima were accepted")
+	}
+
+	// Repeating the false full reading must not bypass the alternate maximum
+	// learning path. This mirrors the observed 1756/1756 -> 65/65 OCR error.
+	for i := 0; i < 2; i++ {
+		if hpLearned, _ := p.LearnFullStatusMaximums(65, 65, 0, 0); hpLearned {
+			t.Fatal("repeated false 65/65 OCR reading was learned as an HP maximum")
+		}
+	}
+	if p.Status().HPMax != 0 {
+		t.Fatal("sub-100 maximum was stored after repeated full readings")
 	}
 }
 
@@ -156,12 +167,12 @@ func TestAutoPotTreatsMissingHPFillAsZeroWhenTPBarIsVisible(t *testing.T) {
 		AutoPotHPPercent: 70,
 		AutoPotHPSlotVK:  50,
 	})
-	p.Observe(50, 50, 30, 30)
+	p.Observe(1756, 1756, 1200, 1200)
 
 	events := p.ObserveBarPercents(0, false, 100, true)
 	status := p.Status()
-	if status.HPCurrent != 0 || status.HPMax != 50 {
-		t.Fatalf("empty HP bar = %d/%d, want 0/50", status.HPCurrent, status.HPMax)
+	if status.HPCurrent != 0 || status.HPMax != 1756 {
+		t.Fatalf("empty HP bar = %d/%d, want 0/1756", status.HPCurrent, status.HPMax)
 	}
 	if len(events) != 1 || events[0].Resource != "HP" || events[0].Current != 0 {
 		t.Fatalf("unexpected events for empty HP bar: %+v", events)

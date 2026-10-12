@@ -35,15 +35,6 @@
     "clientWidth": 1920,
     "clientHeight": 1440
   },
-  "8": {
-    "x": 1560,
-    "y": 1196,
-    "width": 1,
-    "height": 1,
-    "selected": true,
-    "clientWidth": 1920,
-    "clientHeight": 1440
-  },
   "9": {
     "x": 1610,
     "y": 1198,
@@ -54,8 +45,8 @@
     "clientHeight": 1440
   },
   "AutoAccept": {
-    "x": 932,
-    "y": 765,
+    "x": 933,
+    "y": 766,
     "width": 1,
     "height": 1,
     "selected": true,
@@ -63,7 +54,7 @@
     "clientHeight": 1440
   },
   "AutoResu": {
-    "x": 935,
+    "x": 931,
     "y": 766,
     "width": 1,
     "height": 1,
@@ -81,8 +72,8 @@
     "clientHeight": 1440
   },
   "DCOk": {
-    "x": 1068,
-    "y": 763,
+    "x": 1066,
+    "y": 765,
     "width": 1,
     "height": 1,
     "selected": true,
@@ -99,8 +90,8 @@
     "clientHeight": 1440
   },
   "F1": {
-    "x": 1315,
-    "y": 1245,
+    "x": 1564,
+    "y": 1193,
     "width": 1,
     "height": 1,
     "selected": true,
@@ -108,8 +99,8 @@
     "clientHeight": 1440
   },
   "F2": {
-    "x": 1365,
-    "y": 1249,
+    "x": 1608,
+    "y": 1197,
     "width": 1,
     "height": 1,
     "selected": true,
@@ -117,8 +108,8 @@
     "clientHeight": 1440
   },
   "F3": {
-    "x": 1365,
-    "y": 1295,
+    "x": 1413,
+    "y": 1197,
     "width": 1,
     "height": 1,
     "selected": true,

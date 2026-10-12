@@ -100,9 +100,10 @@ type BotController struct {
 	// through the small cooldown makes every action wait for the preceding one.
 	inputMu     sync.Mutex
 	lastInputAt time.Time
-	// emergencyPending is an atomic counter, not a boolean: AutoPot, popup, and
-	// multiple Emergency slots may overlap. Regular skills stay preempted until
-	// every higher-priority action has left the input path.
+	// Pending flags are atomic counters, not booleans: multiple detector events
+	// may overlap. Popup/party actions outrank survival input; both outrank Buff
+	// and Attack.
+	popupPending     int32
 	emergencyPending int32
 	buffPending      int32
 	normalHoldUntil  int64
@@ -111,6 +112,10 @@ type BotController struct {
 	// castMu serializes skill casts so click-mode cursor operations don't
 	// race with each other or with target-panel actions.
 	castMu sync.Mutex
+
+	// Test hook for validating multi-click transactions without sending real
+	// Windows input. Production controllers leave it nil.
+	clickPointOverride func(allowWhenStopped bool, hwnd uintptr, x, y, refW, refH int) error
 
 	// stop mirrors activeRun.stop for the small amount of legacy/test code that
 	// inspects it directly. Workers never read this mutable field: every worker
@@ -181,6 +186,13 @@ const clickInputSpacing = 200 * time.Millisecond
 // activates the popup; the second click confirms it. Both clicks are sent
 // while holding inputMu so no skill click can slip in between.
 const popupDoubleClickDelay = 250 * time.Millisecond
+
+const (
+	partyInviteArmDelay        = 350 * time.Millisecond
+	partyInviteCharacterTries  = 3
+	partyInviteRetryGap        = 120 * time.Millisecond
+	partyInvitePostClickSettle = 350 * time.Millisecond
+)
 
 // ============================================================
 // Constructor
@@ -746,6 +758,7 @@ const (
 	inputPriorityNormal = iota
 	inputPriorityBuff
 	inputPriorityEmergency
+	inputPriorityPopup
 )
 
 func (b *BotController) runSkillScheduler(
@@ -958,13 +971,14 @@ func (b *BotController) holdNormalSkillsFor(duration time.Duration) {
 }
 
 func (b *BotController) normalSkillsBlocked() bool {
-	return atomic.LoadInt32(&b.emergencyPending) > 0 ||
+	return atomic.LoadInt32(&b.popupPending) > 0 ||
+		atomic.LoadInt32(&b.emergencyPending) > 0 ||
 		atomic.LoadInt32(&b.buffPending) > 0 ||
 		time.Now().UnixNano() < atomic.LoadInt64(&b.normalHoldUntil)
 }
 
 func (b *BotController) waitForEmergencyClear(stop <-chan struct{}) bool {
-	for atomic.LoadInt32(&b.emergencyPending) > 0 {
+	for atomic.LoadInt32(&b.popupPending) > 0 || atomic.LoadInt32(&b.emergencyPending) > 0 {
 		timer := time.NewTimer(5 * time.Millisecond)
 		select {
 		case <-stop:
@@ -981,6 +995,23 @@ func (b *BotController) waitForEmergencyClear(stop <-chan struct{}) bool {
 func waitForSkillGap(stop <-chan struct{}, duration time.Duration) bool {
 	timer := time.NewTimer(duration)
 	defer timer.Stop()
+	select {
+	case <-timer.C:
+		return true
+	case <-stop:
+		return false
+	}
+}
+
+// waitForInputGap keeps a multi-click transaction responsive to Stop. Actions
+// explicitly allowed after Stop (Auto Resu) still receive their bounded delay.
+func waitForInputGap(stop <-chan struct{}, duration time.Duration, abortOnStop bool) bool {
+	timer := time.NewTimer(duration)
+	defer timer.Stop()
+	if !abortOnStop {
+		<-timer.C
+		return true
+	}
 	select {
 	case <-timer.C:
 		return true
@@ -1052,7 +1083,9 @@ func (b *BotController) castBuffSkillForRun(skill SkillConfig, stop <-chan struc
 			}
 			err := clickWindowClientPointReferencePriority(
 				stop,
-				func() bool { return atomic.LoadInt32(&b.emergencyPending) > 0 },
+				func() bool {
+					return atomic.LoadInt32(&b.popupPending) > 0 || atomic.LoadInt32(&b.emergencyPending) > 0
+				},
 				b.hwnd,
 				skill.ClickX,
 				skill.ClickY,
@@ -1170,16 +1203,26 @@ func (b *BotController) CastEmergencySkill(skill WebEmergencySkillConfig) bool {
 	// Signal that an emergency wants to fire immediately. This interrupts any
 	// regular skill that is mid-spacing-wait so the emergency click is not
 	// delayed by attack skills saturating the input channel.
+	stop := b.currentStopChannel()
 	atomic.AddInt32(&b.emergencyPending, 1)
 	defer atomic.AddInt32(&b.emergencyPending, -1)
-	sent := b.castPriorityInputWithTargetGate(name, true, func() bool {
+	sent := b.castInputWithTargetGateForRunPriority(name, true, stop, inputPriorityEmergency, func() bool {
 		if skill.Click {
 			if !skill.ClickAreaSet {
 				fmt.Printf("[Bot] %s -> FAILED click area is not set\n", name)
 				return false
 			}
-			if err := b.clickPoint(false, b.hwnd, skill.ClickX, skill.ClickY, skill.ClickReferenceWidth, skill.ClickReferenceHeight); err != nil {
-				if errors.Is(err, errClickCanceled) {
+			if err := b.clickPointForRun(
+				stop,
+				false,
+				func() bool { return atomic.LoadInt32(&b.popupPending) > 0 },
+				b.hwnd,
+				skill.ClickX,
+				skill.ClickY,
+				skill.ClickReferenceWidth,
+				skill.ClickReferenceHeight,
+			); err != nil {
+				if errors.Is(err, errClickCanceled) || errors.Is(err, errClickPreempted) {
 					return false
 				}
 				b.observeVirtualClickResult(err)
@@ -1204,11 +1247,49 @@ func (b *BotController) CastPriorityKeyAction(name string, vk uintptr) bool {
 	if !b.IsRunning() || b.IsChatPaused() {
 		return false
 	}
+	stop := b.currentStopChannel()
 	atomic.AddInt32(&b.emergencyPending, 1)
 	defer atomic.AddInt32(&b.emergencyPending, -1)
 
-	sent := b.castPriorityInputWithTargetGate(name, true, func() bool {
+	sent := b.castInputWithTargetGateForRunPriority(name, true, stop, inputPriorityEmergency, func() bool {
 		return pressKeyToWindow(b.hwnd, vk)
+	})
+	if sent {
+		b.holdNormalSkillsFor(emergencyAttackHold)
+	}
+	return sent
+}
+
+// CastPriorityClickAction is the click-mode counterpart used by AutoPot. It
+// outranks Buff/Attack but yields to the short popup/party transaction.
+func (b *BotController) CastPriorityClickAction(name string, hwnd uintptr, x, y, refW, refH int) bool {
+	if !b.IsRunning() || b.IsChatPaused() {
+		return false
+	}
+	stop := b.currentStopChannel()
+	atomic.AddInt32(&b.emergencyPending, 1)
+	defer atomic.AddInt32(&b.emergencyPending, -1)
+
+	sent := b.castInputWithTargetGateForRunPriority(name, true, stop, inputPriorityEmergency, func() bool {
+		err := b.clickPointForRun(
+			stop,
+			false,
+			func() bool { return atomic.LoadInt32(&b.popupPending) > 0 },
+			hwnd,
+			x,
+			y,
+			refW,
+			refH,
+		)
+		if err == nil {
+			b.observeVirtualClickResult(nil)
+			return true
+		}
+		if !errors.Is(err, errClickCanceled) && !errors.Is(err, errClickPreempted) {
+			b.observeVirtualClickResult(err)
+			appendOCRLog("VIRTUAL CLICK FAILED | %s | Saved=%d,%d | Reference=%dx%d | %v", name, x, y, refW, refH, err)
+		}
+		return false
 	})
 	if sent {
 		b.holdNormalSkillsFor(emergencyAttackHold)
@@ -1226,14 +1307,16 @@ func (b *BotController) CastPriorityKeyAction(name string, vk uintptr) bool {
 // selecting on it while waiting would win immediately on every iteration and
 // spin forever. That loop kept runPicker alive and made a later Alt+F12 Stop
 // appear to hang.
-func (b *BotController) lockInputAfterSpacing(spacing time.Duration, abortForPriority, abortOnStop bool) bool {
-	stop := b.currentStopChannel()
+func (b *BotController) lockInputAfterSpacingForRun(stop <-chan struct{}, spacing time.Duration, abortForPriority, abortOnStop bool) bool {
 	for {
 		b.inputMu.Lock()
-		wait := spacing
-		if !b.lastInputAt.IsZero() {
-			wait -= time.Since(b.lastInputAt)
+		// With no previous input there is nothing to space against. Initializing
+		// wait to spacing and leaving lastInputAt empty made the first popup/party
+		// action sleep forever in this loop.
+		if b.lastInputAt.IsZero() {
+			return true
 		}
+		wait := spacing - time.Since(b.lastInputAt)
 		if wait <= 0 {
 			return true
 		}
@@ -1271,9 +1354,13 @@ func (b *BotController) lockInputAfterSpacing(spacing time.Duration, abortForPri
 	}
 }
 
-// CastClickAction handles AutoAccept, AutoResu, and DCOk clicks through the
-// same input channel as skills so they don't race with skill clicks. These
-// are critical survival actions and get emergency-level priority.
+func (b *BotController) lockInputAfterSpacing(spacing time.Duration, abortForPriority, abortOnStop bool) bool {
+	return b.lockInputAfterSpacingForRun(b.currentStopChannel(), spacing, abortForPriority, abortOnStop)
+}
+
+// CastClickAction handles AutoAccept, AutoResu, and DCOk as an atomic popup
+// transaction. The popupPending gate keeps recurring click skills and survival
+// actions from entering between focus and confirmation.
 //
 // If secondClickDelay > 0, a second click is sent after that delay while
 // inputMu is still held, so no skill click can slip in between the two clicks.
@@ -1284,12 +1371,13 @@ func (b *BotController) CastClickAction(name string, hwnd uintptr, x, y, refW, r
 		return false
 	}
 
-	// Same atomic signaling as CastEmergencySkill: regular skills mid-spacing-wait
-	// will detect this and abort so the critical click fires immediately.
-	atomic.AddInt32(&b.emergencyPending, 1)
-	defer atomic.AddInt32(&b.emergencyPending, -1)
+	stop := b.currentStopChannel()
+	// Popup actions outrank every recurring automation path. The counter covers
+	// the complete focus+confirm transaction, including its inter-click gap.
+	atomic.AddInt32(&b.popupPending, 1)
+	defer atomic.AddInt32(&b.popupPending, -1)
 
-	if !b.lockInputAfterSpacing(clickInputSpacing, false, !allowWhenStopped) {
+	if !b.lockInputAfterSpacingForRun(stop, clickInputSpacing, false, !allowWhenStopped) {
 		return false
 	}
 	defer b.inputMu.Unlock()
@@ -1298,7 +1386,7 @@ func (b *BotController) CastClickAction(name string, hwnd uintptr, x, y, refW, r
 	}
 
 	// First click.
-	err := b.clickPoint(allowWhenStopped, hwnd, x, y, refW, refH)
+	err := b.clickPointForRun(stop, allowWhenStopped, nil, hwnd, x, y, refW, refH)
 	if err != nil {
 		if errors.Is(err, errClickCanceled) {
 			return false
@@ -1310,43 +1398,52 @@ func (b *BotController) CastClickAction(name string, hwnd uintptr, x, y, refW, r
 	b.observeVirtualClickResult(nil)
 	b.lastInputAt = time.Now()
 	b.holdNormalSkillsFor(emergencyAttackHold)
+	clickTotal := 1
+	if secondClickDelay > 0 {
+		clickTotal = 2
+	}
+	appendOCRLog("POPUP CLICK SENT | Action=%s | Click=1/%d | Saved=%d,%d | Reference=%dx%d", name, clickTotal, x, y, refW, refH)
 
 	// Optional second click (e.g. to confirm a popup that needs focus first).
 	// inputMu remains held throughout so skill clicks cannot interleave.
 	if secondClickDelay > 0 {
-		time.Sleep(secondClickDelay)
-		err = b.clickPoint(allowWhenStopped, hwnd, x, y, refW, refH)
+		if !waitForInputGap(stop, secondClickDelay, !allowWhenStopped) {
+			return false
+		}
+		err = b.clickPointForRun(stop, allowWhenStopped, nil, hwnd, x, y, refW, refH)
 		if err != nil {
 			if errors.Is(err, errClickCanceled) {
 				return false
 			}
 			b.observeVirtualClickResult(err)
 			appendOCRLog("VIRTUAL CLICK FAILED | %s (2nd) | Saved=%d,%d | Reference=%dx%d | %v", name, x, y, refW, refH, err)
-			// First click already landed; report success so the caller
-			// records the action (e.g. lastEnterAt, ExpectPanel).
-			return true
+			// The first click only focuses/activates the popup. Do not report the
+			// action as accepted unless the second confirmation click lands.
+			return false
 		}
 		b.observeVirtualClickResult(nil)
 		b.lastInputAt = time.Now()
+		appendOCRLog("POPUP CLICK SENT | Action=%s | Click=2/2 | Saved=%d,%d | Reference=%dx%d", name, x, y, refW, refH)
 	}
 	b.holdNormalSkillsFor(emergencyAttackHold)
 
 	return true
 }
 
-// CastClickAction2 sends two sequential clicks through the same input channel as
-// skills. Used by ChatParty which clicks the party button first, then the
-// character name/position. Both clicks are atomic — if the first fails the second
-// is skipped.
+// CastClickAction2 runs the complete ChatParty transaction: arm Party mode,
+// wait for the game UI, click the character, then keep every other input tier
+// blocked while the game consumes that click. A transient character-click
+// failure is retried without releasing popupPending.
 func (b *BotController) CastClickAction2(hwnd uintptr, x1, y1, refW1, refH1, x2, y2, refW2, refH2 int) bool {
 	if !b.IsRunning() || b.IsChatPaused() {
 		return false
 	}
 
-	atomic.AddInt32(&b.emergencyPending, 1)
-	defer atomic.AddInt32(&b.emergencyPending, -1)
+	stop := b.currentStopChannel()
+	atomic.AddInt32(&b.popupPending, 1)
+	defer atomic.AddInt32(&b.popupPending, -1)
 
-	if !b.lockInputAfterSpacing(clickInputSpacing, false, true) {
+	if !b.lockInputAfterSpacingForRun(stop, clickInputSpacing, false, true) {
 		return false
 	}
 	defer b.inputMu.Unlock()
@@ -1354,7 +1451,7 @@ func (b *BotController) CastClickAction2(hwnd uintptr, x1, y1, refW1, refH1, x2,
 		return false
 	}
 
-	err := b.clickPoint(false, hwnd, x1, y1, refW1, refH1)
+	err := b.clickPointForRun(stop, false, nil, hwnd, x1, y1, refW1, refH1)
 	if err != nil {
 		if errors.Is(err, errClickCanceled) {
 			return false
@@ -1364,28 +1461,65 @@ func (b *BotController) CastClickAction2(hwnd uintptr, x1, y1, refW1, refH1, x2,
 		return false
 	}
 	b.observeVirtualClickResult(nil)
-	time.Sleep(150 * time.Millisecond)
+	appendOCRLog("CHAT PARTY CLICK SENT | Saved=%d,%d | Reference=%dx%d | Waiting=%s for character click", x1, y1, refW1, refH1, partyInviteArmDelay)
+	if !waitForInputGap(stop, partyInviteArmDelay, true) {
+		appendOCRLog("CHAT CHARACTER CLICK CANCELED | Runtime stopped during Party activation delay")
+		return false
+	}
 
-	err = b.clickPoint(false, hwnd, x2, y2, refW2, refH2)
-	if err != nil {
+	characterSent := false
+	for attempt := 1; attempt <= partyInviteCharacterTries; attempt++ {
+		err = b.clickPointForRun(stop, false, nil, hwnd, x2, y2, refW2, refH2)
+		if err == nil {
+			b.observeVirtualClickResult(nil)
+			characterSent = true
+			appendOCRLog("CHAT CHARACTER CLICK SENT | Attempt=%d/%d | Saved=%d,%d | Reference=%dx%d", attempt, partyInviteCharacterTries, x2, y2, refW2, refH2)
+			break
+		}
 		if errors.Is(err, errClickCanceled) {
+			appendOCRLog("CHAT CHARACTER CLICK CANCELED | Attempt=%d/%d | Runtime stopped", attempt, partyInviteCharacterTries)
 			return false
 		}
 		b.observeVirtualClickResult(err)
-		appendOCRLog("CHAT CHARACTER CLICK FAILED | Saved=%d,%d | Reference=%dx%d | %v", x2, y2, refW2, refH2, err)
-		return false
+		appendOCRLog("CHAT CHARACTER CLICK FAILED | Attempt=%d/%d | Saved=%d,%d | Reference=%dx%d | %v", attempt, partyInviteCharacterTries, x2, y2, refW2, refH2, err)
+		if attempt < partyInviteCharacterTries && !waitForInputGap(stop, partyInviteRetryGap, true) {
+			return false
+		}
 	}
-	b.observeVirtualClickResult(nil)
+
+	// Even on a physical API failure, do not immediately release Buff/skill
+	// input after Party mode was armed. This prevents the next timer from
+	// consuming that mode while the invite flow is still settling/retrying.
 	b.lastInputAt = time.Now()
 	b.holdNormalSkillsFor(emergencyAttackHold)
-	return true
+	if !waitForInputGap(stop, partyInvitePostClickSettle, true) {
+		return false
+	}
+	return characterSent
 }
 
 func (b *BotController) clickPoint(allowWhenStopped bool, hwnd uintptr, x, y, refW, refH int) error {
+	return b.clickPointForRun(b.currentStopChannel(), allowWhenStopped, nil, hwnd, x, y, refW, refH)
+}
+
+func (b *BotController) clickPointForRun(stop <-chan struct{}, allowWhenStopped bool, preempted func() bool, hwnd uintptr, x, y, refW, refH int) error {
+	if !allowWhenStopped {
+		select {
+		case <-stop:
+			return errClickCanceled
+		default:
+		}
+	}
+	if preempted != nil && preempted() {
+		return errClickPreempted
+	}
+	if b.clickPointOverride != nil {
+		return b.clickPointOverride(allowWhenStopped, hwnd, x, y, refW, refH)
+	}
 	if allowWhenStopped {
 		return clickWindowClientPointReference(hwnd, x, y, refW, refH)
 	}
-	return clickWindowClientPointReferenceCancelable(b.currentStopChannel(), hwnd, x, y, refW, refH)
+	return clickWindowClientPointReferencePriority(stop, preempted, hwnd, x, y, refW, refH)
 }
 
 func (b *BotController) castKey(
@@ -1417,14 +1551,6 @@ func (b *BotController) castInputWithTargetGate(
 	return b.castInputWithTargetGateForRun(name, bypassTargetGate, b.currentStopChannel(), sendInput)
 }
 
-func (b *BotController) castPriorityInputWithTargetGate(
-	name string,
-	bypassTargetGate bool,
-	sendInput func() bool,
-) bool {
-	return b.castInputWithTargetGateForRunPriority(name, bypassTargetGate, b.currentStopChannel(), inputPriorityEmergency, sendInput)
-}
-
 func (b *BotController) castInputWithTargetGateForRun(
 	name string,
 	bypassTargetGate bool,
@@ -1436,10 +1562,12 @@ func (b *BotController) castInputWithTargetGateForRun(
 
 func (b *BotController) inputPreempted(priority int) bool {
 	switch priority {
-	case inputPriorityEmergency:
+	case inputPriorityPopup:
 		return false
+	case inputPriorityEmergency:
+		return atomic.LoadInt32(&b.popupPending) > 0
 	case inputPriorityBuff:
-		return atomic.LoadInt32(&b.emergencyPending) > 0
+		return atomic.LoadInt32(&b.popupPending) > 0 || atomic.LoadInt32(&b.emergencyPending) > 0
 	default:
 		return b.normalSkillsBlocked()
 	}

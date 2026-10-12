@@ -71,6 +71,17 @@ func TestSkillPriorityGateOrdersEmergencyBuffAttack(t *testing.T) {
 	}
 	atomic.AddInt32(&bot.emergencyPending, -1)
 
+	atomic.AddInt32(&bot.popupPending, 1)
+	if !bot.inputPreempted(inputPriorityNormal) ||
+		!bot.inputPreempted(inputPriorityBuff) ||
+		!bot.inputPreempted(inputPriorityEmergency) {
+		t.Fatal("pending popup/party action did not preempt Attack, Buff, and Emergency/AutoPot")
+	}
+	if bot.inputPreempted(inputPriorityPopup) {
+		t.Fatal("popup/party priority action preempted itself")
+	}
+	atomic.AddInt32(&bot.popupPending, -1)
+
 	atomic.StoreInt64(&bot.normalHoldUntil, time.Now().Add(time.Second).UnixNano())
 	if !bot.normalSkillsBlocked() {
 		t.Fatal("post-Buff casting window did not block Attack")
@@ -82,6 +93,163 @@ func TestSkillPriorityGateOrdersEmergencyBuffAttack(t *testing.T) {
 
 	if clickBuffRepeatCount != 3 {
 		t.Fatalf("Buff click burst = %d, want 3", clickBuffRepeatCount)
+	}
+}
+
+func TestAutoAcceptDoubleClickRemainsOneCriticalTransaction(t *testing.T) {
+	bot := NewBotController(0, BotConfig{})
+	bot.runningFlag.Store(true)
+	points := make([][2]int, 0, 2)
+	bot.clickPointOverride = func(_ bool, _ uintptr, x, y, _, _ int) error {
+		if atomic.LoadInt32(&bot.popupPending) == 0 {
+			t.Fatal("AutoAccept click ran outside popup priority transaction")
+		}
+		if !bot.normalSkillsBlocked() {
+			t.Fatal("Attack was not blocked during AutoAccept transaction")
+		}
+		points = append(points, [2]int{x, y})
+		return nil
+	}
+
+	if !bot.CastClickAction("AutoAccept", 1, 320, 240, 800, 600, 5*time.Millisecond, false) {
+		t.Fatal("AutoAccept double click failed")
+	}
+	if len(points) != 2 || points[0] != [2]int{320, 240} || points[1] != [2]int{320, 240} {
+		t.Fatalf("AutoAccept clicks = %#v, want the same accept point twice", points)
+	}
+	if atomic.LoadInt32(&bot.popupPending) != 0 {
+		t.Fatal("AutoAccept left popup priority pending after completion")
+	}
+}
+
+func TestChatPartyInviteKeepsPartyThenCharacterClicksAtomic(t *testing.T) {
+	bot := NewBotController(0, BotConfig{})
+	bot.runningFlag.Store(true)
+	points := make([][2]int, 0, 2)
+	bot.clickPointOverride = func(_ bool, _ uintptr, x, y, _, _ int) error {
+		if atomic.LoadInt32(&bot.popupPending) == 0 || !bot.normalSkillsBlocked() {
+			t.Fatal("ChatParty click ran without blocking recurring skills")
+		}
+		points = append(points, [2]int{x, y})
+		return nil
+	}
+
+	if !bot.CastClickAction2(1, 100, 200, 800, 600, 400, 500, 800, 600) {
+		t.Fatal("ChatParty invite transaction failed")
+	}
+	want := [][2]int{{100, 200}, {400, 500}}
+	if len(points) != len(want) || points[0] != want[0] || points[1] != want[1] {
+		t.Fatalf("ChatParty clicks = %#v, want %#v", points, want)
+	}
+}
+
+func TestChatPartyRetriesCharacterWithoutReleasingPriority(t *testing.T) {
+	bot := NewBotController(0, BotConfig{})
+	bot.runningFlag.Store(true)
+	calls := 0
+	bot.clickPointOverride = func(_ bool, _ uintptr, x, y, _, _ int) error {
+		calls++
+		if atomic.LoadInt32(&bot.popupPending) == 0 || !bot.normalSkillsBlocked() {
+			t.Fatal("ChatParty released priority before its character retry completed")
+		}
+		if calls == 1 && (x != 100 || y != 200) {
+			t.Fatalf("first click = %d,%d, want Party point 100,200", x, y)
+		}
+		if calls >= 2 && (x != 400 || y != 500) {
+			t.Fatalf("character click = %d,%d, want 400,500", x, y)
+		}
+		if calls == 2 {
+			return errCursorAPI
+		}
+		return nil
+	}
+
+	if !bot.CastClickAction2(1, 100, 200, 800, 600, 400, 500, 800, 600) {
+		t.Fatal("ChatParty did not recover from a transient character-click failure")
+	}
+	if calls != 3 {
+		t.Fatalf("ChatParty made %d physical attempts, want Party + two character attempts", calls)
+	}
+}
+
+func TestStopCancelsAutoAcceptBeforeSecondClick(t *testing.T) {
+	bot := NewBotController(0, BotConfig{})
+	bot.runningFlag.Store(true)
+	calls := 0
+	bot.clickPointOverride = func(_ bool, _ uintptr, _, _, _, _ int) error {
+		calls++
+		if calls == 1 {
+			close(bot.stop)
+		}
+		return nil
+	}
+
+	if bot.CastClickAction("AutoAccept", 1, 1, 1, 10, 10, time.Second, false) {
+		t.Fatal("AutoAccept reported success after Stop canceled its confirm click")
+	}
+	if calls != 1 {
+		t.Fatalf("AutoAccept sent %d clicks after Stop, want only the first", calls)
+	}
+}
+
+func TestAutoAcceptRequiresSuccessfulSecondClick(t *testing.T) {
+	bot := NewBotController(0, BotConfig{})
+	bot.runningFlag.Store(true)
+	calls := 0
+	bot.clickPointOverride = func(_ bool, _ uintptr, _, _, _, _ int) error {
+		calls++
+		if calls == 2 {
+			return errClickCanceled
+		}
+		return nil
+	}
+
+	if bot.CastClickAction("AutoAccept", 1, 1, 1, 10, 10, time.Millisecond, false) {
+		t.Fatal("AutoAccept reported success when only the popup-focus click landed")
+	}
+	if calls != 2 {
+		t.Fatalf("AutoAccept attempted %d clicks, want 2", calls)
+	}
+}
+
+func TestAutoResuDoubleClicksWhileBotIsDeathPaused(t *testing.T) {
+	bot := NewBotController(0, BotConfig{})
+	// A death pause has already closed this worker generation and cleared the
+	// running flag. Auto Resu is the one popup action explicitly allowed here.
+	close(bot.stop)
+	clicks := 0
+	bot.clickPointOverride = func(allowWhenStopped bool, _ uintptr, _, _, _, _ int) error {
+		if !allowWhenStopped {
+			t.Fatal("Auto Resu click was not marked as allowed during death pause")
+		}
+		clicks++
+		return nil
+	}
+
+	if !bot.CastClickAction("AutoResu", 1, 320, 240, 800, 600, time.Millisecond, true) {
+		t.Fatal("Auto Resu double click failed while bot was death-paused")
+	}
+	if clicks != 2 {
+		t.Fatalf("Auto Resu sent %d clicks, want 2", clicks)
+	}
+}
+
+func TestPopupPriorityPreemptsAutoPotClick(t *testing.T) {
+	bot := NewBotController(0, BotConfig{})
+	bot.runningFlag.Store(true)
+	called := false
+	bot.clickPointOverride = func(_ bool, _ uintptr, _, _, _, _ int) error {
+		called = true
+		return nil
+	}
+	atomic.AddInt32(&bot.popupPending, 1)
+	defer atomic.AddInt32(&bot.popupPending, -1)
+
+	if bot.CastPriorityClickAction("AutoPot", 1, 1, 1, 10, 10) {
+		t.Fatal("AutoPot click bypassed a pending popup/party action")
+	}
+	if called {
+		t.Fatal("AutoPot reached physical click delivery while popup/party was pending")
 	}
 }
 
@@ -109,21 +277,61 @@ func TestPostStopClickSpacingDoesNotSpin(t *testing.T) {
 	}
 }
 
-func TestHotkeyResumesBotPausedByDeathWithoutRuntimeRestart(t *testing.T) {
+func TestFirstClickSpacingAcquiresInputImmediately(t *testing.T) {
+	bot := NewBotController(0, BotConfig{})
+	done := make(chan bool, 1)
+	go func() {
+		locked := bot.lockInputAfterSpacing(200*time.Millisecond, false, true)
+		if locked {
+			bot.inputMu.Unlock()
+		}
+		done <- locked
+	}()
+
+	select {
+	case locked := <-done:
+		if !locked {
+			t.Fatal("first input was rejected")
+		}
+	case <-time.After(50 * time.Millisecond):
+		t.Fatal("first input entered an endless spacing wait")
+	}
+}
+
+func TestHotkeyStopsRuntimeWhileBotIsPausedByDeath(t *testing.T) {
 	bot := NewBotController(0, BotConfig{Enabled: true})
 	runtime := NewRuntimeManager()
 	runtime.running = true
 	runtime.bot = bot
 	runtime.runningFlag.Store(true)
-	runtime.activeControl.Store(&runtimeControl{bot: bot, stopCh: make(chan struct{})})
+	stopCh := make(chan struct{})
+	runtime.stopCh = stopCh
+	runtime.activeControl.Store(&runtimeControl{bot: bot, stopCh: stopCh})
 
-	if got := runtime.ToggleFromHotkey(); got != "resumed" {
-		t.Fatalf("ToggleFromHotkey() = %q, want resumed", got)
+	if got := runtime.ToggleFromHotkey(); got != "stopped" {
+		t.Fatalf("ToggleFromHotkey() = %q, want stopped", got)
 	}
-	if !bot.IsRunning() {
-		t.Fatal("hotkey did not resume the paused bot")
+	if runtime.IsRunning() {
+		t.Fatal("runtime remained active after Alt+F12 on death pause")
 	}
-	bot.Stop()
+	select {
+	case <-stopCh:
+	default:
+		t.Fatal("Alt+F12 did not broadcast detector cancellation during death pause")
+	}
+	deadline := time.Now().Add(time.Second)
+	for {
+		runtime.mu.RLock()
+		cleanupDone := !runtime.running && !runtime.stopping
+		runtime.mu.RUnlock()
+		if cleanupDone {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("runtime cleanup did not finish after death-pause hotkey Stop")
+		}
+		time.Sleep(time.Millisecond)
+	}
 }
 
 func TestClickSkillLiveUpdateDoesNotTrapOldWorkers(t *testing.T) {
