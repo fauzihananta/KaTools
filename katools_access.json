@@ -2,6 +2,7 @@
   "refreshEveryHours": 24,
   "offlineGraceHours": 6,
   "allowedReleaseIDs": [
+    "2026FreeVersion",
     "6d39619b-7c97-4a22-9789-d0c18dec9eac"
   ]
 }
