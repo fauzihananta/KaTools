@@ -410,6 +410,10 @@ h2 {
 
 .action-card:hover { border-color: var(--border-active); }
 .action-card label { min-width: 0; font-size: 13px; font-weight: 500; color: var(--text-primary); overflow-wrap: anywhere; }
+.party-invite-controls { min-width: 0; display: flex; flex-direction: column; gap: 5px; }
+.party-invite-actions { display: flex; gap: 10px; }
+.party-invite-actions label { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 500; color: var(--text-secondary); }
+.party-invite-actions input { accent-color: var(--accent-cyan); }
 
 /* Hidden state rules */
 #attackActionCard[hidden], #pickActionCard[hidden], #normalFunctionSkillsSection[hidden],
@@ -421,6 +425,10 @@ h2 {
 .click-area-controls[hidden], #pickDelay[hidden] {
   display: none !important;
 }
+
+/* A row defines display:grid, which otherwise overrides the browser's
+   built-in [hidden] rule. Keep Click-only rows out of Keyboard Method. */
+.roi-picker-row[hidden] { display: none !important; }
 
 /* ---- Inputs ---- */
 input[type="checkbox"] {
@@ -1050,9 +1058,13 @@ body.click-input-mode #deathROIInfo, body.click-input-mode #deathROIPreview { di
 					id="autoAccept"
 					disabled>
 
-				<label for="autoAccept">
-					Auto Accept Party
-				</label>
+				<div class="party-invite-controls">
+					<label for="autoAccept">Auto Party Invite</label>
+					<div class="party-invite-actions" role="radiogroup" aria-label="Party invite action">
+						<label><input type="radio" name="partyInviteAction" value="accept" id="partyInviteAccept" checked> Accept</label>
+						<label><input type="radio" name="partyInviteAction" value="reject" id="partyInviteReject"> Reject</label>
+					</div>
+				</div>
 
 				<button
 					type="button"
@@ -1104,10 +1116,19 @@ body.click-input-mode #deathROIInfo, body.click-input-mode #deathROIPreview { di
 
 		</div>
 
+		<div class="roi-picker-row" id="partyInviteActionAreas">
+			<div><div class="roi-picker-title">Party Invite Accept pointer (left)</div><div class="click-area-controls" id="clickAreaControlsAutoAccept"><span class="click-area-status" id="clickAreaStatusAutoAccept">Pointer not set</span><div class="click-area-buttons"><button type="button" onclick="openClickSkillPicker('AutoAccept')">SET POINTER</button><button type="button" id="clickAreaResetAutoAccept" onclick="resetClickSkillArea('AutoAccept')">RESET</button></div></div></div>
+			<div><div class="roi-picker-title">Party Invite Reject pointer (right)</div><div class="click-area-controls" id="clickAreaControlsAutoReject"><span class="click-area-status" id="clickAreaStatusAutoReject">Pointer not set</span><div class="click-area-buttons"><button type="button" onclick="openClickSkillPicker('AutoReject')">SET POINTER</button><button type="button" id="clickAreaResetAutoReject" onclick="resetClickSkillArea('AutoReject')">RESET</button></div></div></div>
+		</div>
+
 		<div class="roi-picker-row click-global-action-area" id="clickGlobalActionAreas" hidden>
-			<div><div class="roi-picker-title">Auto Accept Party click point</div><div class="click-area-controls" id="clickAreaControlsAutoAccept"><span class="click-area-status" id="clickAreaStatusAutoAccept">Area not set</span><div class="click-area-buttons"><button type="button" onclick="openClickSkillPicker('AutoAccept')">SET AREA</button><button type="button" id="clickAreaResetAutoAccept" onclick="resetClickSkillArea('AutoAccept')">RESET</button></div></div></div>
 			<div><div class="roi-picker-title">Auto Resu click point</div><div class="click-area-controls" id="clickAreaControlsAutoResu"><span class="click-area-status" id="clickAreaStatusAutoResu">Area not set</span><div class="click-area-buttons"><button type="button" onclick="openClickSkillPicker('AutoResu')">SET AREA</button><button type="button" id="clickAreaResetAutoResu" onclick="resetClickSkillArea('AutoResu')">RESET</button></div></div></div>
 			<div><div class="roi-picker-title">DC dialog OK click point</div><div class="click-area-controls" id="clickAreaControlsDCOk"><span class="click-area-status" id="clickAreaStatusDCOk">Area not set</span><div class="click-area-buttons"><button type="button" onclick="openClickSkillPicker('DCOk')">SET AREA</button><button type="button" id="clickAreaResetDCOk" onclick="resetClickSkillArea('DCOk')">RESET</button></div></div></div>
+		</div>
+
+		<div class="roi-picker-row">
+			<div><div class="roi-picker-title">Party mode: Normal / Automatic</div><div class="click-area-controls" id="clickAreaControlsPartyAutomatic"><span class="click-area-status" id="clickAreaStatusPartyAutomatic">Area not set</span><div class="click-area-buttons"><button type="button" onclick="openClickSkillPicker('PartyAutomatic')">SET AREA</button><button type="button" id="clickAreaResetPartyAutomatic" onclick="resetClickSkillArea('PartyAutomatic')">RESET</button></div></div><div class="hint">Select the full loot-mode button, including enough width for Master Loot. KaTools clicks only when OCR reads Normal; Automatic and Master Loot are skipped.</div></div>
+			<img id="partyAutomaticROIPreview" class="party-roi-preview" alt="Party Normal / Automatic scan area preview">
 		</div>
 
 		<div class="roi-picker-row click-global-action-area" id="clickPopupScanAreas" hidden>
@@ -1128,20 +1149,20 @@ body.click-input-mode #deathROIInfo, body.click-input-mode #deathROIPreview { di
 			</div>
 		</div>
 
-		<div class="roi-picker-row click-global-action-area" id="chatTextClickSettings" hidden>
+		<div class="roi-picker-row" id="chatTextClickSettings" hidden>
 			<div>
-				<div class="roi-picker-title"><label><input type="checkbox" id="chatTextClickEnabled"> Click chat keyword</label></div>
-				<div class="click-area-controls">
+				<div class="roi-picker-title"><label><input type="checkbox" id="chatTextClickEnabled"> Chat keyword party invite</label></div>
+				<div class="click-area-controls" id="chatTextInviteControls">
 					<label for="chatTextClickKeyword">Keyword</label>
 					<input type="text" id="chatTextClickKeyword" placeholder="Add Party Please" autocomplete="off">
 					<span class="click-area-status" id="chatTextROIInfo">Scan area not set</span>
 					<div class="click-area-buttons"><button type="button" class="chat-scan-area-button" onclick="openChatTextPicker()">SET SCAN AREA</button></div>
-					<div class="roi-picker-title">Party target click point</div>
-					<div class="click-area-controls" id="clickAreaControlsChatParty"><span class="click-area-status" id="clickAreaStatusChatParty">Area not set</span><div class="click-area-buttons"><button type="button" onclick="openClickSkillPicker('ChatParty')">SET PARTY POINT</button><button type="button" id="clickAreaResetChatParty" onclick="resetClickSkillArea('ChatParty')">RESET</button></div></div>
+					<div class="roi-picker-title">Party action pointer</div>
+					<div class="click-area-controls" id="clickAreaControlsChatParty"><span class="click-area-status" id="clickAreaStatusChatParty">Pointer not set</span><div class="click-area-buttons"><button type="button" onclick="openClickSkillPicker('ChatParty')">SET PARTY POINTER</button><button type="button" id="clickAreaResetChatParty" onclick="resetClickSkillArea('ChatParty')">RESET</button></div></div>
 					<label for="chatTextClickYOffset">Click below detected text (px)</label>
 					<input type="number" class="numeric-input" id="chatTextClickYOffset" min="0" max="200" step="1" value="100">
 				</div>
-				<div class="hint">When the phrase is found, KaTools clicks the saved Party point first, then clicks below the floating text to target that character.</div>
+				<div class="hint">Available in Keyboard and Click Method. When the phrase is found, KaTools clicks the saved Party pointer first, then clicks below the floating text to invite that character.</div>
 			</div>
 		</div>
 
@@ -1641,8 +1662,24 @@ const supportSkillSlots = [
 	["1", 0x31], ["2", 0x32], ["3", 0x33], ["4", 0x34], ["5", 0x35]
 ];
 
-const clickSkillSlots = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "0", "F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10", "HP", "TP", "AutoAccept", "AutoResu", "DCOk", "ChatParty"];
+const clickSkillSlots = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "0", "F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10", "HP", "TP", "AutoAccept", "AutoReject", "AutoResu", "DCOk", "ChatParty", "PartyAutomatic"];
 clickSkillSlots.push("Emergency1", "Emergency2", "Emergency3", "Emergency4", "Emergency5");
+
+function clickSkillUsesScanArea(slot) {
+	return slot === "PartyAutomatic";
+}
+
+// Most click-mode selections persist one coordinate. Keep their labels honest:
+// only PartyAutomatic is a real rectangle because it is also an OCR source.
+function updateClickSkillPickerLabels() {
+	for (const button of document.querySelectorAll('button[onclick^="openClickSkillPicker"]')) {
+		const match = (button.getAttribute("onclick") || "").match(/openClickSkillPicker\('([^']+)'\)/);
+		if (!match) continue;
+		const isArea = clickSkillUsesScanArea(match[1]);
+		button.textContent = isArea ? "SET AREA" : "SET POINTER";
+		button.title = isArea ? "Select the OCR area and click centre" : "Set one click point";
+	}
+}
 
 function ensureClickTargetToggles() {
 	for (const slot of clickSkillSlots.slice(0, 20)) {
@@ -1673,6 +1710,7 @@ function isClickWhitelistMode() {
 
 async function loadClickSkillAreas() {
 	try {
+		updateClickSkillPickerLabels();
 		const response = await fetch("/api/click-skill/areas", { cache: "no-store" });
 		const result = await response.json();
 		const areas = result.areas || {};
@@ -1682,7 +1720,8 @@ async function loadClickSkillAreas() {
 			const reset = document.getElementById("clickAreaReset" + slot);
 			if (!status || !reset) continue;
 			const selected = !!(area && area.selected);
-			status.textContent = selected ? "Area set" : "Area not set";
+			const label = clickSkillUsesScanArea(slot) ? "Area" : "Pointer";
+			status.textContent = selected ? label + " set" : label + " not set";
 			reset.disabled = !selected || !hasSelectedTargetWindow();
 		}
 	} catch (error) {
@@ -1712,6 +1751,7 @@ async function openClickSkillPicker(slot) {
 	let refreshes = 0;
 	const timer = setInterval(async function() {
 		await loadClickSkillAreas();
+		if (slot === "PartyAutomatic") await loadPartyAutomaticPreview();
 		const areaResponse = await fetch("/api/click-skill/areas", { cache: "no-store" });
 		const areaResult = await areaResponse.json();
 		const area = (areaResult.areas || {})[slot];
@@ -1734,6 +1774,7 @@ async function resetClickSkillArea(slot) {
 		return;
 	}
 	await loadClickSkillAreas();
+	if (slot === "PartyAutomatic") await loadPartyAutomaticPreview();
 	scheduleLiveConfig();
 }
 
@@ -1965,6 +2006,9 @@ function getConfig() {
 		autoAcceptEnabled:
 			document.getElementById("autoAccept").checked,
 
+		partyInviteAction:
+			(document.querySelector('input[name="partyInviteAction"]:checked') || {}).value || "accept",
+
 		autoPauseDeathEnabled:
 			document.getElementById("autoPauseDeath").checked,
 
@@ -1991,7 +2035,7 @@ function getConfig() {
 
 		clickWhitelistTargetNames:
 			document.getElementById("clickWhitelistTargetNames").value,
-		chatTextClickEnabled: document.getElementById("chatTextClickEnabled").checked && getTargetInputMethod() === "click",
+		chatTextClickEnabled: document.getElementById("chatTextClickEnabled").checked,
 		chatTextClickKeyword: document.getElementById("chatTextClickKeyword").value,
 		chatTextClickYOffset: Number(document.getElementById("chatTextClickYOffset").value),
 
@@ -2280,6 +2324,9 @@ function applySavedConfig(config) {
 
 	savedWindowHWND = config.hwnd || "";
 	document.getElementById("autoAccept").checked = !!config.autoAcceptEnabled;
+	const inviteAction = config.partyInviteAction === "reject" ? "reject" : "accept";
+	const inviteActionRadio = document.querySelector('input[name="partyInviteAction"][value="' + inviteAction + '"]');
+	if (inviteActionRadio) inviteActionRadio.checked = true;
 	// Saved config is applied before the selected window and Death ROI finish
 	// loading. Do not discard these values merely because the controls are
 	// temporarily disabled; the ROI availability pass below will clear them
@@ -2647,7 +2694,7 @@ function updateWindowDependentControls() {
 	}
 
 	if (!ready) {
-		for (const id of ["autoAccept", "autoPauseDeath", "autoResurrect", "autoPotHP", "autoPotTP"]) {
+		for (const id of ["autoAccept", "partyInviteAccept", "partyInviteReject", "autoPauseDeath", "autoResurrect", "autoPotHP", "autoPotTP"]) {
 			document.getElementById(id).disabled = true;
 		}
 		for (const id of ["autoPotHPPercent", "autoPotHPSlot", "autoPotTPPercent", "autoPotTPSlot"]) {
@@ -2725,7 +2772,8 @@ async function loadWindows() {
 			option.value =
 				item.hwnd;
 
-			option.textContent = item.title;
+			option.textContent = compactWindowOptionTitle(item.title);
+			option.title = item.title;
 
 			select.appendChild(option);
 		}
@@ -2827,8 +2875,12 @@ function updateAutoAcceptAvailability(selected) {
 	if (getTargetInputMethod() === "click") return;
 	const checkbox = document.getElementById("autoAccept");
 	const label = document.querySelector('label[for="autoAccept"]');
+	const accept = document.getElementById("partyInviteAccept");
+	const reject = document.getElementById("partyInviteReject");
 
 	checkbox.disabled = !selected || !hasSelectedTargetWindow();
+	accept.disabled = checkbox.disabled;
+	reject.disabled = checkbox.disabled;
 	if (!selected) {
 		checkbox.checked = false;
 		label.title = "Select Party OCR area first.";
@@ -2872,6 +2924,16 @@ function updateAutoPauseDeathAvailability(selected) {
 		label.title = "";
 		resuLabel.title = autoResurrect.disabled ? "Enable Auto Pause on Death first." : "";
 	}
+}
+
+// Native WebView select popups size themselves from their longest option.
+// Browser tabs can have a full URL as their title, which used to stretch this
+// game-window list across the whole desktop. Keep the candidate selectable,
+// but keep its display label compact.
+function compactWindowOptionTitle(title) {
+	const compact = String(title || "").replace(/\s+/g, " ").trim();
+	const maxLength = 72;
+	return compact.length > maxLength ? compact.slice(0, maxLength - 1) + "…" : compact;
 }
 
 async function loadClickPopupScanAreas() {
@@ -2920,7 +2982,11 @@ async function loadClickPopupScanAreas() {
 function updateAutoAcceptClickAvailability(selected) {
 	const checkbox = document.getElementById("autoAccept");
 	const label = document.querySelector('label[for="autoAccept"]');
+	const accept = document.getElementById("partyInviteAccept");
+	const reject = document.getElementById("partyInviteReject");
 	checkbox.disabled = !selected || !hasSelectedTargetWindow();
+	accept.disabled = checkbox.disabled;
+	reject.disabled = checkbox.disabled;
 	if (!selected) { checkbox.checked = false; label.title = "Select the Click Party popup scan area first."; }
 	else label.title = "";
 }
@@ -3074,6 +3140,12 @@ function syncTargetMode() {
 	ensureClickTargetToggles();
 	const windowReady = hasSelectedTargetWindow();
 	const clickMode = getTargetInputMethod() === "click";
+	// Both Party Invite actions use their own saved pointers in every input
+	// method; Keyboard Method changes combat skills only, not popup actions.
+	const partyInviteAccept = document.getElementById("partyInviteAccept");
+	const partyInviteReject = document.getElementById("partyInviteReject");
+	partyInviteAccept.disabled = !windowReady;
+	partyInviteReject.disabled = !windowReady;
 	syncSkillPresentation(clickMode);
 	const clickWhitelistMode = clickMode && isClickWhitelistMode();
 	document.body.classList.toggle("click-whitelist-mode", clickWhitelistMode);
@@ -3093,10 +3165,10 @@ function syncTargetMode() {
 	const clickPopupScans = document.getElementById("clickPopupScanAreas");
 	if (clickPopupScans) clickPopupScans.hidden = !clickMode;
 	const chatTextSettings = document.getElementById("chatTextClickSettings");
-	if (chatTextSettings) chatTextSettings.hidden = !clickMode;
-	document.getElementById("chatTextClickEnabled").disabled = !windowReady || !clickMode;
-	document.getElementById("chatTextClickKeyword").disabled = !windowReady || !clickMode;
-	document.getElementById("chatTextClickYOffset").disabled = !windowReady || !clickMode;
+	if (chatTextSettings) chatTextSettings.hidden = false;
+	document.getElementById("chatTextClickEnabled").disabled = !windowReady;
+	document.getElementById("chatTextClickKeyword").disabled = !windowReady;
+	document.getElementById("chatTextClickYOffset").disabled = !windowReady;
 	for (const id of ["partyROIInfo", "partyROIPreview", "deathROIInfo", "deathROIPreview"]) {
 		const element = document.getElementById(id);
 		if (element) element.hidden = clickMode;
@@ -3138,8 +3210,18 @@ function syncTargetMode() {
 	for (const extraSkill of document.querySelectorAll(".click-only-skill")) {
 		extraSkill.hidden = !clickMode && supportMode;
 	}
+	// These three controls drive the cross-method Party Invite flow. They use
+	// virtual mouse clicks even while combat skills use Keyboard Method, so do
+	// not hide them with the regular Click Method skill controls.
+	const partyInviteControls = new Set([
+		"clickAreaControlsAutoAccept",
+		"clickAreaControlsAutoReject",
+		"clickAreaControlsChatParty",
+		"clickAreaControlsPartyAutomatic",
+		"chatTextInviteControls",
+	]);
 	for (const controls of document.querySelectorAll(".click-area-controls")) {
-		controls.hidden = !clickMode;
+		controls.hidden = !clickMode && !partyInviteControls.has(controls.id);
 	}
 	document.getElementById("attackActionCard").hidden = clickMode;
 	document.getElementById("pickActionCard").hidden = clickMode;
@@ -3277,6 +3359,23 @@ async function loadPartyPreview() {
 
 	} catch (error) {
 
+		preview.style.display = "none";
+	}
+}
+
+async function loadPartyAutomaticPreview() {
+	const preview = document.getElementById("partyAutomaticROIPreview");
+	if (!preview) return;
+	try {
+		const response = await fetch("/api/party-automatic/preview", { cache: "no-store" });
+		if (!response.ok) {
+			preview.style.display = "none";
+			preview.removeAttribute("src");
+			return;
+		}
+		preview.src = "/api/party-automatic/preview?t=" + Date.now();
+		preview.style.display = "block";
+	} catch (_) {
 		preview.style.display = "none";
 	}
 }
@@ -3429,6 +3528,7 @@ async function initializeUI() {
 	await loadWindows();
 	loadPartyROI();
 	loadPartyPreview();
+	loadPartyAutomaticPreview();
 	loadDeathROI();
 	loadDeathPreview();
 	loadTargetROI();
@@ -3549,6 +3649,7 @@ type WebBotConfig struct {
 	HWND string `json:"hwnd"`
 
 	AutoAcceptEnabled            bool    `json:"autoAcceptEnabled"`
+	PartyInviteAction            string  `json:"partyInviteAction"`
 	AutoPauseDeathEnabled        bool    `json:"autoPauseDeathEnabled"`
 	AutoResurrectEnabled         bool    `json:"autoResurrectEnabled"`
 	AssistSkillVK                uintptr `json:"assistSkillVK"`
@@ -3833,12 +3934,20 @@ func validateAutoPotClickArea(cfg WebBotConfig) string {
 }
 
 func validateClickActionAreas(cfg WebBotConfig) string {
+	areas := LoadClickSkillROIs()
+	if cfg.AutoAcceptEnabled {
+		slot := "AutoAccept"
+		label := "Accept"
+		if cfg.PartyInviteSelection() == partyInviteReject {
+			slot = "AutoReject"
+			label = "Reject"
+		}
+		if !areas[slot].Selected {
+			return "Set the Party Invite " + label + " pointer before starting."
+		}
+	}
 	if !cfg.ClickMethod() {
 		return ""
-	}
-	areas := LoadClickSkillROIs()
-	if cfg.AutoAcceptEnabled && !areas["AutoAccept"].Selected {
-		return "Set the Auto Accept Party click area before starting."
 	}
 	if cfg.AutoResurrectEnabled && !areas["AutoResu"].Selected {
 		return "Set the Auto Resu click area before starting."
@@ -3881,14 +3990,17 @@ func validateEmergencySkillsConfig(cfg WebBotConfig) string {
 type AutoAcceptController struct {
 	mu      sync.RWMutex
 	enabled bool
+	action  string
 }
 
 func NewAutoAcceptController(
 	enabled bool,
+	action string,
 ) *AutoAcceptController {
 
 	return &AutoAcceptController{
 		enabled: enabled,
+		action:  normalizedPartyInviteAction(action),
 	}
 }
 
@@ -3900,14 +4012,38 @@ func (a *AutoAcceptController) IsEnabled() bool {
 	return a.enabled
 }
 
-func (a *AutoAcceptController) SetEnabled(
+func (a *AutoAcceptController) Set(
 	enabled bool,
+	action string,
 ) {
 
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
 	a.enabled = enabled
+	a.action = normalizedPartyInviteAction(action)
+}
+
+func (a *AutoAcceptController) Action() string {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return a.action
+}
+
+const (
+	partyInviteAccept = "accept"
+	partyInviteReject = "reject"
+)
+
+func normalizedPartyInviteAction(action string) string {
+	if strings.EqualFold(strings.TrimSpace(action), partyInviteReject) {
+		return partyInviteReject
+	}
+	return partyInviteAccept
+}
+
+func (cfg WebBotConfig) PartyInviteSelection() string {
+	return normalizedPartyInviteAction(cfg.PartyInviteAction)
 }
 
 // ============================================================
@@ -4038,7 +4174,8 @@ func newWebUIMux(
 				// Let the unload beacon leave the browser before stopping its
 				// receiving HTTP server.
 				time.Sleep(150 * time.Millisecond)
-				runtimeManager.Stop()
+				runtimeManager.StopWithReason(stopReasonAppExit)
+				runtimeManager.CloseTelemetry()
 				os.Exit(0)
 			}()
 		})
@@ -4124,6 +4261,23 @@ func newWebUIMux(
 			_, _ = w.Write(preview)
 		},
 	)
+
+	// Preview of the compact Normal / Automatic OCR selection. This uses the
+	// same picker crop the runtime will later read and click in its centre.
+	mux.HandleFunc("/api/party-automatic/preview", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		preview, ok := getPartyAutomaticROIPreview()
+		if !ok {
+			http.Error(w, "no selected-area preview yet", http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "image/png")
+		w.Header().Set("Cache-Control", "no-store")
+		_, _ = w.Write(preview)
+	})
 
 	// ========================================================
 	// PARTY ROI PICKER
@@ -4567,6 +4721,9 @@ func newWebUIMux(
 			writeJSONError(w, err.Error())
 			return
 		}
+		if request.Slot == "PartyAutomatic" {
+			clearROIPreview("party-automatic")
+		}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]interface{}{"success": true})
 	})
@@ -4714,7 +4871,7 @@ func newWebUIMux(
 			}
 
 			if cfg.AutoAcceptEnabled && ((!cfg.ClickMethod() && !ocrworker.LoadPartyROI().Selected) || (cfg.ClickMethod() && !LoadClickPopupScanAreas()["party"].ROI.Selected)) {
-				writeJSONError(w, "Select Party OCR area before enabling Auto Accept Party.")
+				writeJSONError(w, "Select Party OCR area before enabling Auto Party Invite.")
 				return
 			}
 			if (cfg.AutoPotHPEnabled || cfg.AutoPotTPEnabled) && !LoadStatusROI().Selected {
@@ -4869,7 +5026,7 @@ func newWebUIMux(
 			if cfg.AutoAcceptEnabled && ((!cfg.ClickMethod() && !ocrworker.LoadPartyROI().Selected) || (cfg.ClickMethod() && !LoadClickPopupScanAreas()["party"].ROI.Selected)) {
 				writeJSONError(
 					w,
-					"Select Party OCR area before enabling Auto Accept Party.",
+					"Select Party OCR area before enabling Auto Party Invite.",
 				)
 				return
 			}
@@ -5089,8 +5246,9 @@ func applyWebBotConfig(
 	cfg WebBotConfig,
 ) {
 
-	autoAccept.SetEnabled(
+	autoAccept.Set(
 		cfg.AutoAcceptEnabled,
+		cfg.PartyInviteSelection(),
 	)
 
 	autoPot.Update(cfg)
@@ -5432,17 +5590,14 @@ func validateChatTextClickConfig(cfg WebBotConfig) string {
 	if cfg.ChatTextClickYOffset < 0 || cfg.ChatTextClickYOffset > 200 {
 		return "Click-below-text offset must be between 0 and 200 pixels."
 	}
-	if !cfg.ClickMethod() {
-		return "Click Chat Keyword is available only with Click Method."
-	}
 	if strings.TrimSpace(cfg.ChatTextClickKeyword) == "" {
-		return "Enter the chat keyword to search for."
+		return "Enter the chat keyword for Party Invite."
 	}
 	if !LoadChatTextROI().ROI.Selected {
-		return "Set the chat text scan area before enabling Click Chat Keyword."
+		return "Set the chat text scan area before enabling Chat Keyword Party Invite."
 	}
 	if area, ok := LoadClickSkillROIs()["ChatParty"]; !ok || !area.Selected {
-		return "Set the Party target click point before enabling Click Chat Keyword."
+		return "Set the Party action pointer before enabling Chat Keyword Party Invite."
 	}
 	return ""
 }

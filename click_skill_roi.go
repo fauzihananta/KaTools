@@ -13,7 +13,7 @@ var clickSkillROIMu sync.Mutex
 
 var clickSkillSlots = []string{"1", "2", "3", "4", "5", "6", "7", "8", "9", "0", "F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10"}
 
-var clickActionSlots = []string{"AutoAccept", "AutoResu", "DCOk", "ChatParty"}
+var clickActionSlots = []string{"AutoAccept", "AutoReject", "AutoResu", "DCOk", "ChatParty", "PartyAutomatic"}
 
 type ClickSkillROI struct {
 	X            int  `json:"x"`
@@ -47,6 +47,13 @@ func isClickSkillSlot(slot string) bool {
 		}
 	}
 	return false
+}
+
+// partyAutomaticUsesArea is the one click-action selection that is also an
+// OCR source. Its whole rectangle is read for "Normal" / "Automatic", while
+// its centre is the point clicked to enable Automatic mode.
+func partyAutomaticUsesArea(slot string) bool {
+	return slot == "PartyAutomatic"
 }
 
 func loadClickSkillROIsLocked() map[string]ClickSkillROI {

@@ -16,6 +16,7 @@ var roiConfigFiles = []string{
 	targetROIFile,
 	chatTextROIFile,
 	"party_roi_preview.png",
+	"party-automatic_roi_preview.png",
 	"status_roi_preview.png",
 	"death_roi_preview.png",
 	"target_roi_preview.png",

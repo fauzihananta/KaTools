@@ -45,8 +45,17 @@
     "clientHeight": 1440
   },
   "AutoAccept": {
-    "x": 933,
+    "x": 936,
     "y": 766,
+    "width": 1,
+    "height": 1,
+    "selected": true,
+    "clientWidth": 1920,
+    "clientHeight": 1440
+  },
+  "AutoReject": {
+    "x": 1067,
+    "y": 763,
     "width": 1,
     "height": 1,
     "selected": true,
@@ -63,8 +72,8 @@
     "clientHeight": 1440
   },
   "ChatParty": {
-    "x": 1597,
-    "y": 1347,
+    "x": 1320,
+    "y": 1249,
     "width": 1,
     "height": 1,
     "selected": true,
@@ -139,6 +148,15 @@
     "y": 1248,
     "width": 1,
     "height": 1,
+    "selected": true,
+    "clientWidth": 1920,
+    "clientHeight": 1440
+  },
+  "PartyAutomatic": {
+    "x": 1,
+    "y": 739,
+    "width": 99,
+    "height": 33,
     "selected": true,
     "clientWidth": 1920,
     "clientHeight": 1440

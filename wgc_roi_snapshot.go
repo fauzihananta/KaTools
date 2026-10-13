@@ -19,6 +19,8 @@ func wgcSnapshotLabels(kind string) []string {
 		return []string{"HP Area"}
 	case "party":
 		return []string{"Party Area"}
+	case "party-automatic":
+		return []string{"Party Automatic Area"}
 	case "death":
 		// Death and resurrection intentionally share one selected dialog ROI.
 		return []string{"Death Area", "Resu Area"}
@@ -43,6 +45,8 @@ func roiPreviewForSnapshot(kind string) ([]byte, bool) {
 		return getStatusROIPreview()
 	case "party":
 		return getPartyROIPreview()
+	case "party-automatic":
+		return getPartyAutomaticROIPreview()
 	case "death":
 		return getDeathROIPreview()
 	case "target":
@@ -140,6 +144,14 @@ func (m *RuntimeManager) CaptureConfiguredWGCROISnapshots() {
 		{kind: "death", roi: LoadDeathROI()},
 		{kind: "target", roi: LoadTargetROI()},
 		{kind: "chat-text", roi: LoadChatTextROI().ROI},
+	}
+	if area, ok := LoadClickSkillROIs()["PartyAutomatic"]; ok {
+		items = append(items, struct {
+			kind string
+			roi  ocrworker.PartyROIConfig
+		}{kind: "party-automatic", roi: ocrworker.PartyROIConfig{
+			X: area.X, Y: area.Y, Width: area.Width, Height: area.Height, Selected: area.Selected,
+		}})
 	}
 	m.mu.RLock()
 	clickMode := m.bot != nil && m.bot.ClickMethodEnabled()

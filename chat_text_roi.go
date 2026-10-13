@@ -141,7 +141,7 @@ func chatTextCombatPointCollision(x, y, referenceWidth, referenceHeight int, are
 	marginX := max(12, int(math.Round(32*float64(referenceWidth)/1920)))
 	marginY := max(12, int(math.Round(32*float64(referenceHeight)/1440)))
 	for slot, area := range areas {
-		if !area.Selected || slot == "AutoAccept" || slot == "AutoResu" || slot == "DCOk" || slot == "ChatParty" {
+		if !area.Selected || slot == "AutoAccept" || slot == "AutoReject" || slot == "AutoResu" || slot == "DCOk" || slot == "ChatParty" {
 			continue
 		}
 		areaRefW, areaRefH := area.ClientWidth, area.ClientHeight

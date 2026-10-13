@@ -467,6 +467,37 @@ func (o *OCR) RunImage(img image.Image) (*Result, error) {
 	return o.RunPartyImageVariants(img, nil)
 }
 
+// RunPartyModeTextImage reads the compact Normal/Automatic control in the
+// party panel. PSM 7 is deliberately first: unlike a popup, this selection is
+// one short line and must not be merged with player names or HP bars.
+func (o *OCR) RunPartyModeTextImage(img image.Image) (*Result, error) {
+	if img == nil {
+		return nil, fmt.Errorf("image is nil")
+	}
+
+	startTotal := time.Now()
+	var texts []string
+	for _, psm := range []string{"7", "6", PartyOCRPSM} {
+		for index, variant := range buildOCRVariants(img) {
+			text, err := o.runTesseractImageWithOptions(variant, index, psm, "")
+			if err != nil {
+				continue
+			}
+			text = normalize(text)
+			if text == "" {
+				continue
+			}
+			// These two exact words are sufficient for the caller; returning early
+			// also avoids launching extra Tesseract processes after a clean read.
+			if strings.Contains(text, "automatic") || strings.Contains(text, "normal") {
+				return &Result{Text: text, Duration: time.Since(startTotal)}, nil
+			}
+			texts = append(texts, text)
+		}
+	}
+	return &Result{Text: bestText(texts), Duration: time.Since(startTotal)}, nil
+}
+
 // RunPartyImageVariants performs party-dialog OCR for only the requested
 // preprocessing variants. A nil or empty list preserves the historical
 // behavior and tries every variant. The runtime uses a one-variant fast pass

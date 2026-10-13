@@ -47,6 +47,7 @@ type roiPreviewCache struct {
 }
 
 var partyROIPreview roiPreviewCache
+var partyAutomaticROIPreview roiPreviewCache
 var statusROIPreview roiPreviewCache
 var deathROIPreview roiPreviewCache
 var targetROIPreview roiPreviewCache
@@ -58,6 +59,10 @@ var clickPopupScanPreviews = map[string]*roiPreviewCache{
 
 func getPartyROIPreview() ([]byte, bool) {
 	return getROIPreview(&partyROIPreview, "party")
+}
+
+func getPartyAutomaticROIPreview() ([]byte, bool) {
+	return getROIPreview(&partyAutomaticROIPreview, "party-automatic")
 }
 
 func getStatusROIPreview() ([]byte, bool) {
@@ -106,6 +111,8 @@ func roiPreviewForKind(kind string) *roiPreviewCache {
 	switch kind {
 	case "party":
 		return &partyROIPreview
+	case "party-automatic":
+		return &partyAutomaticROIPreview
 	case "status":
 		return &statusROIPreview
 	case "death":
@@ -160,6 +167,10 @@ func saveROIPreview(kind string, png []byte) error {
 
 func capturePartyROIPreview(rect pickerRECT, roi ocrworker.PartyROIConfig) error {
 	return captureROIPreview(rect, roi, "party")
+}
+
+func capturePartyAutomaticROIPreview(rect pickerRECT, roi ocrworker.PartyROIConfig) error {
+	return captureROIPreview(rect, roi, "party-automatic")
 }
 
 func captureStatusROIPreview(rect pickerRECT, roi ocrworker.PartyROIConfig) error {

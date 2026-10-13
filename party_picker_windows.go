@@ -467,9 +467,11 @@ func runPartyROIPicker(
 	fmt.Println("----------------------------------------")
 	fmt.Println("PARTY OCR ROI PICKER")
 	fmt.Println("----------------------------------------")
-	fmt.Println(
-		"Drag over the party popup text.",
-	)
+	if state.kind == "click-skill:PartyAutomatic" {
+		fmt.Println("Drag over the full loot-mode button (Normal / Automatic / Master Loot).")
+	} else {
+		fmt.Println("Drag over the party popup text.")
+	}
 	fmt.Println(
 		"ESC = cancel",
 	)
@@ -610,7 +612,7 @@ func partyPickerWndProc(
 				state.currentY = y
 			}
 
-			if strings.HasPrefix(state.kind, "click-skill:") {
+			if strings.HasPrefix(state.kind, "click-skill:") && !partyAutomaticUsesArea(strings.TrimPrefix(state.kind, "click-skill:")) {
 				clickX := state.currentX
 				clickY := state.currentY
 				state.dragging = false
@@ -721,14 +723,17 @@ func capturePickerEvidence(state *partyPickerState) {
 	targetRect := state.targetRect
 	kind := state.kind
 	state.mu.Unlock()
-	if !capture || strings.HasPrefix(kind, "click-skill:") {
+	partyAutomaticArea := kind == "click-skill:PartyAutomatic"
+	if !capture || (strings.HasPrefix(kind, "click-skill:") && !partyAutomaticArea) {
 		return
 	}
 	// Let DWM present the destroyed overlay before taking the desktop preview.
 	time.Sleep(80 * time.Millisecond)
 
 	var err error
-	if kind == "status" {
+	if partyAutomaticArea {
+		err = capturePartyAutomaticROIPreview(targetRect, selected)
+	} else if kind == "status" {
 		err = captureStatusROIPreview(targetRect, selected)
 	} else if kind == "target" {
 		err = captureTargetROIPreview(targetRect, selected)
@@ -745,7 +750,11 @@ func capturePickerEvidence(state *partyPickerState) {
 		fmt.Println("[ROI Picker] Preview capture failed:", err)
 	}
 	if globalRuntimeManager != nil {
-		if err := globalRuntimeManager.CaptureWGCROISnapshot(kind, selected); err != nil {
+		snapshotKind := kind
+		if partyAutomaticArea {
+			snapshotKind = "party-automatic"
+		}
+		if err := globalRuntimeManager.CaptureWGCROISnapshot(snapshotKind, selected); err != nil {
 			fmt.Println("[WGC Snapshot]", err)
 		}
 	}

@@ -155,8 +155,12 @@ func main() {
 
 	runtimeManager := NewRuntimeManager()
 	accessController := NewAccessController()
+	telemetryReporter := NewTelemetryReporter(releaseID)
+	runtimeManager.SetTelemetryReporter(telemetryReporter)
+	defer runtimeManager.CloseTelemetry()
+	telemetryReporter.Open()
 	runtimeManager.SetAccessController(accessController)
-	accessController.SetOnRevoked(runtimeManager.Stop)
+	accessController.SetOnRevoked(func() { runtimeManager.StopWithReason(stopReasonAccessRevoked) })
 	accessController.Start(context.Background())
 	globalRuntimeManager = runtimeManager
 	SetHotkeyRuntimeManager(runtimeManager)
@@ -172,7 +176,7 @@ func main() {
 
 	// The native WebView2 window returns only after it has closed. Keep the
 	// existing runtime cleanup path for a normal close.
-	runtimeManager.Stop()
+	runtimeManager.StopWithReason(stopReasonAppExit)
 }
 
 func enablePerMonitorDPIAwareness() {
@@ -196,6 +200,10 @@ type RuntimeManager struct {
 	// construct a manager without a live policy endpoint. The desktop entry
 	// point always installs one before exposing the UI.
 	access *AccessController
+
+	// telemetry reports coarse lifecycle state only: app open/close and bot
+	// start/stop. It intentionally has no heartbeat or persistent connection.
+	telemetry atomic.Pointer[TelemetryReporter]
 
 	// activeControl is the lock-free emergency lane used by UI Stop and the
 	// global hotkey. It contains only immutable pointers for one runtime
@@ -337,6 +345,42 @@ func (m *RuntimeManager) SetAccessController(access *AccessController) {
 	m.mu.Unlock()
 }
 
+func (m *RuntimeManager) SetTelemetryReporter(telemetry *TelemetryReporter) {
+	if m == nil {
+		return
+	}
+	m.telemetry.Store(telemetry)
+}
+
+func (m *RuntimeManager) telemetryReporter() *TelemetryReporter {
+	if m == nil {
+		return nil
+	}
+	return m.telemetry.Load()
+}
+
+func (m *RuntimeManager) CloseTelemetry() {
+	if telemetry := m.telemetryReporter(); telemetry != nil {
+		telemetry.Close()
+	}
+}
+
+const (
+	stopReasonManual        = "manual"
+	stopReasonDCDetected    = "dc_detected"
+	stopReasonAccessRevoked = "access_revoked"
+	stopReasonAppExit       = "app_exit"
+)
+
+func normalizeStopReason(reason string) string {
+	switch strings.TrimSpace(reason) {
+	case stopReasonDCDetected, stopReasonAccessRevoked, stopReasonAppExit:
+		return strings.TrimSpace(reason)
+	default:
+		return stopReasonManual
+	}
+}
+
 func (m *RuntimeManager) accessStatus() AccessStatus {
 	if m == nil {
 		return AccessStatus{Allowed: false, Message: "Runtime is unavailable."}
@@ -437,7 +481,7 @@ func (m *RuntimeManager) Start(
 	// optional OCR-driven features are disabled.
 	bot := NewBotController(hwnd, newDefaultBotConfig())
 	botStartGeneration := atomic.LoadUint64(&bot.stopGeneration)
-	autoAccept := NewAutoAcceptController(cfg.AutoAcceptEnabled)
+	autoAccept := NewAutoAcceptController(cfg.AutoAcceptEnabled, cfg.PartyInviteSelection())
 	autoPot := NewAutoPotController(hwnd, cfg)
 	emergency := NewEmergencySkillController(hwnd, cfg)
 	deathPause := NewDeathPauseController(cfg.AutoPauseDeathEnabled, cfg.AutoResurrectEnabled)
@@ -765,6 +809,9 @@ func (m *RuntimeManager) Start(
 	// ========================================================
 
 	bot.startWithGeneration(botStartGeneration)
+	if telemetry := m.telemetryReporter(); telemetry != nil && m.runningFlag.Load() {
+		telemetry.RuntimeStarted()
+	}
 	if targetUntil.StartInitialTarget() {
 		if bot.CastTarget() {
 			appendOCRLog("TARGET UNTIL DEAD | Initial target | Target sent")
@@ -797,7 +844,7 @@ func (m *RuntimeManager) Start(
 			targetUntil,
 			chatTextClick,
 			func(x, y int) { m.setCaptureOffset(x, y) },
-			func() { m.Stop() },
+			func(reason string) { m.StopWithReason(reason) },
 			capturePollingInterval(captureFPS),
 			stopCh,
 		)
@@ -822,11 +869,20 @@ func (m *RuntimeManager) Start(
 // ============================================================
 
 func (m *RuntimeManager) Stop() {
+	m.StopWithReason(stopReasonManual)
+}
+
+func (m *RuntimeManager) StopWithReason(reason string) {
 	// The cancellation phase is deliberately lock-free. Even if another path is
 	// stuck while holding RuntimeManager.mu, the exact active runtime generation
 	// receives detector and bot cancellation immediately.
 	m.stopRequested.Store(true)
-	m.runningFlag.Store(false)
+	wasRunning := m.runningFlag.Swap(false)
+	if wasRunning {
+		if telemetry := m.telemetryReporter(); telemetry != nil {
+			telemetry.RuntimeStopped(normalizeStopReason(reason))
+		}
+	}
 	if control := m.activeControl.Load(); control != nil {
 		control.requestStop()
 	}
@@ -1503,7 +1559,8 @@ func setupShutdown(
 		fmt.Println("Shutting down KaTools...")
 		fmt.Println("----------------------------------------")
 
-		runtimeManager.Stop()
+		runtimeManager.StopWithReason(stopReasonAppExit)
+		runtimeManager.CloseTelemetry()
 
 		os.Exit(0)
 
@@ -1594,7 +1651,7 @@ func runPicker(
 	targetUntil *TargetUntilDeadController,
 	chatTextClick *ChatTextClickSettings,
 	onCaptureOffset func(x, y int),
-	onRuntimeStop func(),
+	onRuntimeStop func(reason string),
 	pollInterval time.Duration,
 	stopCh <-chan struct{},
 ) {
@@ -1637,6 +1694,7 @@ func runPicker(
 	//
 	tesseractPath := resolveTesseractPath()
 	ocr := ocrworker.New(tesseractPath)
+	partyAutomaticOCR := ocrworker.New(tesseractPath)
 	statusOCR := ocrworker.New(tesseractPath)
 	deathOCR := ocrworker.New(tesseractPath)
 	resurrectionOCR := ocrworker.New(tesseractPath)
@@ -1705,9 +1763,23 @@ func runPicker(
 		make(chan ocrEvent, 4)
 
 	ocrBusy := false
+	type partyAutomaticOCREvent struct {
+		text       string
+		area       ClickSkillROI
+		generation uint64
+		err        error
+	}
+	partyAutomaticOCRResultCh := make(chan partyAutomaticOCREvent, 1)
+	partyAutomaticOCRBusy := false
+	var partyAutomaticGeneration uint64
+	var lastPartyAutomaticOCRAt time.Time
+	var partyAutomaticRetryAt time.Time
+	var partyAutomaticReadyAt time.Time
+	partyAutomaticArmed := false
+	partyAutomaticClickSent := false
 
 	var lastOCRStart time.Time
-	var lastEnterAt time.Time
+	var lastPartyInviteAt time.Time
 	// OCR should be fast after the visual detector sees a potential party
 	// popup, but there is no need to start a costly Tesseract process twice a
 	// second while the screen is normal. The occasional full fallback keeps
@@ -1719,6 +1791,11 @@ func runPicker(
 	// unnecessary battery and CPU cost.
 	const partyOCRPassiveInterval = 10 * time.Second
 	const partyOCRFullFallbackInterval = 60 * time.Second
+	// Party mode OCR is armed only by a completed Chat Keyword party invite. A
+	// short interval verifies the state after that invite without scanning while
+	// the party UI is idle.
+	const partyAutomaticOCRInterval = 900 * time.Millisecond
+	const partyAutomaticInitialDelay = 750 * time.Millisecond
 	partyOCRVariantPhase := 0
 	lastPartyFullOCRAt := time.Now()
 
@@ -2266,7 +2343,7 @@ func runPicker(
 	)
 
 	fmt.Println(
-		"AutoAccept   : OCR confirmed -> ENTER",
+		"Party Invite : OCR confirmed -> selected pointer click",
 	)
 
 	fmt.Println(
@@ -2293,6 +2370,19 @@ func runPicker(
 			chatTextClickBusy = false
 			if success {
 				chatTextCooldownUntil = time.Now().Add(3 * time.Second)
+				// This is the leader-side trigger: only after Party mode was armed
+				// and the character click was delivered do we inspect the leader's
+				// Normal / Automatic control. Re-arm on every successful invite,
+				// including later invites into the same eight-member party.
+				if area, ok := LoadClickSkillROIs()["PartyAutomatic"]; ok && area.Selected {
+					partyAutomaticGeneration++
+					partyAutomaticArmed = true
+					partyAutomaticClickSent = false
+					partyAutomaticRetryAt = time.Time{}
+					partyAutomaticReadyAt = time.Now().Add(partyAutomaticInitialDelay)
+					lastPartyAutomaticOCRAt = time.Time{}
+					appendOCRLog("PARTY MODE | Chat party invite completed | checking Normal / Automatic after %s", partyAutomaticInitialDelay)
+				}
 			} else {
 				chatTextLatched = false
 			}
@@ -2310,7 +2400,7 @@ func runPicker(
 				break
 			}
 			enabled, keyword, yOffset := chatTextClick.Snapshot()
-			if !enabled || !bot.ClickMethodEnabled() || strings.TrimSpace(keyword) == "" {
+			if !enabled || strings.TrimSpace(keyword) == "" {
 				chatTextLatched = false
 				break
 			}
@@ -2363,6 +2453,60 @@ func runPicker(
 					case <-stopCh:
 					}
 				}(event, keyword, partyArea)
+			}
+		default:
+		}
+
+		// The party-mode selection is both the small OCR crop and the click
+		// target. It is armed only by the Chat Keyword invite transaction above.
+		// Only an exact Normal read gets one click. Automatic and Master Loot
+		// must both be left untouched so the compact loot-mode control is never
+		// advanced accidentally.
+		select {
+		case event := <-partyAutomaticOCRResultCh:
+			partyAutomaticOCRBusy = false
+			if event.err != nil {
+				appendOCRLog("PARTY MODE OCR | failed | %v", event.err)
+				break
+			}
+			if event.generation != partyAutomaticGeneration || !partyAutomaticArmed ||
+				bot == nil || !bot.IsRunning() {
+				break
+			}
+
+			switch detectPartyAutomaticState(event.text) {
+			case partyAutomaticEnabled:
+				partyAutomaticArmed = false
+				appendOCRLog("PARTY MODE | Automatic confirmed | Text=%q", event.text)
+			case partyAutomaticNormal:
+				if partyAutomaticClickSent {
+					partyAutomaticArmed = false
+					appendOCRLog("PARTY MODE | Still Normal after one click | Waiting for next Chat party invite")
+					break
+				}
+				if time.Now().Before(partyAutomaticRetryAt) {
+					break
+				}
+				partyAutomaticRetryAt = time.Now().Add(2 * time.Second)
+				sent := bot != nil && bot.CastPriorityClickAction(
+					"PartyAutomatic",
+					uintptr(hwnd),
+					event.area.X+event.area.Width/2,
+					event.area.Y+event.area.Height/2,
+					event.area.ClientWidth,
+					event.area.ClientHeight,
+				)
+				if sent {
+					partyAutomaticClickSent = true
+					appendOCRLog("PARTY MODE | Normal confirmed | Click sent at %d,%d", event.area.X+event.area.Width/2, event.area.Y+event.area.Height/2)
+				} else {
+					appendOCRLog("PARTY MODE | Normal confirmed | Click was not sent; retrying after cooldown")
+				}
+			default:
+				// Master Loot and unclear OCR are both safe no-op states. Do not
+				// advance the small mode button unless Normal is explicitly read.
+				partyAutomaticArmed = false
+				appendOCRLog("PARTY MODE | No click | Expected Normal or Automatic, read=%q", event.text)
 			}
 		default:
 		}
@@ -2605,7 +2749,7 @@ func runPicker(
 					oCRTextForLog(event.text),
 				)
 				if onRuntimeStop != nil {
-					go onRuntimeStop()
+					go onRuntimeStop(stopReasonDCDetected)
 				}
 			}
 		default:
@@ -2740,7 +2884,7 @@ func runPicker(
 				if autoAccept != nil &&
 					autoAccept.IsEnabled() {
 
-					if time.Since(lastEnterAt) >=
+					if time.Since(lastPartyInviteAt) >=
 						partyEnterCooldown {
 
 						time.Sleep(
@@ -2748,29 +2892,33 @@ func runPicker(
 						)
 
 						sent := false
-						method := "Enter"
-						if bot.ClickMethodEnabled() {
-							method = "click"
-							if area, ok := LoadClickSkillROIs()["AutoAccept"]; ok && area.Selected {
-								sent = bot.CastClickAction("AutoAccept", uintptr(hwnd), area.X+area.Width/2, area.Y+area.Height/2, area.ClientWidth, area.ClientHeight, popupDoubleClickDelay, false)
-							}
-						} else {
-							sent = pressEnterToWindow(uintptr(hwnd))
+						action := autoAccept.Action()
+						method := "click"
+						slot := "AutoAccept"
+						if action == partyInviteReject {
+							slot = "AutoReject"
+						}
+						if area, ok := LoadClickSkillROIs()[slot]; ok && area.Selected {
+							sent = bot.CastClickAction("PartyInvite "+action, uintptr(hwnd), area.X+area.Width/2, area.Y+area.Height/2, area.ClientWidth, area.ClientHeight, popupDoubleClickDelay, false)
 						}
 
 						if sent {
 
-							lastEnterAt =
+							lastPartyInviteAt =
 								time.Now()
-							partyMembership.ExpectPanel()
+							if action == partyInviteAccept {
+								partyMembership.ExpectPanel()
+							}
 
 							fmt.Printf(
-								"[AutoAccept] ENTER sent to HWND 0x%X\n",
+								"[PartyInvite] %s sent to HWND 0x%X\n",
+								action,
 								uintptr(hwnd),
 							)
 
 							appendOCRLog(
-								"AUTO ACCEPT | INPUT=%s SENT | HWND=0x%X",
+								"PARTY INVITE | ACTION=%s | INPUT=%s SENT | HWND=0x%X",
+								action,
 								method,
 								uintptr(hwnd),
 							)
@@ -2778,12 +2926,14 @@ func runPicker(
 						} else {
 
 							fmt.Printf(
-								"[AutoAccept] ENTER FAILED | HWND 0x%X\n",
+								"[PartyInvite] %s failed for HWND 0x%X\n",
+								action,
 								uintptr(hwnd),
 							)
 
 							appendOCRLog(
-								"AUTO ACCEPT | INPUT=%s FAILED | HWND=0x%X",
+								"PARTY INVITE | ACTION=%s | INPUT=%s FAILED | HWND=0x%X",
+								action,
 								method,
 								uintptr(hwnd),
 							)
@@ -3050,7 +3200,7 @@ func runPicker(
 		lastDetectorRun =
 			time.Now()
 		chatEnabled, chatKeyword, chatYOffset := chatTextClick.Snapshot()
-		if chatEnabled && bot.ClickMethodEnabled() && strings.TrimSpace(chatKeyword) != "" && !chatTextOCRBusy && time.Since(lastChatTextScanAt) >= 900*time.Millisecond {
+		if chatEnabled && strings.TrimSpace(chatKeyword) != "" && !chatTextOCRBusy && time.Since(lastChatTextScanAt) >= 900*time.Millisecond {
 			picked := LoadChatTextROI()
 			if picked.ROI.Selected {
 				roi := partyROIToFrame(picked.ROI, scaleX, scaleY, frameOriginX, frameOriginY)
@@ -3110,6 +3260,38 @@ func runPicker(
 					appendOCRLog("PARTY PANEL DETECTED | Auto Party OCR paused")
 				} else {
 					appendOCRLog("PARTY PANEL CLEARED | Auto Party OCR resumed")
+				}
+			}
+		}
+
+		// A configured PartyAutomatic rectangle is intentionally optional. It is
+		// a compact text crop, not a colour probe: OCR reads the leader's state
+		// only after a completed Chat Keyword invite; its centre is the click.
+		if partyAutomaticArmed && !partyAutomaticOCRBusy &&
+			time.Now().After(partyAutomaticReadyAt) && time.Now().After(partyAutomaticRetryAt) &&
+			time.Since(lastPartyAutomaticOCRAt) >= partyAutomaticOCRInterval {
+			if area, ok := LoadClickSkillROIs()["PartyAutomatic"]; ok && area.Selected {
+				modeROI := partyROIToFrame(ocrworker.PartyROIConfig{
+					X: area.X, Y: area.Y, Width: area.Width, Height: area.Height, Selected: area.Selected,
+				}, scaleX, scaleY, frameOriginX, frameOriginY)
+				modeROI = applyCaptureOffset(modeROI)
+				lastPartyAutomaticOCRAt = time.Now()
+				if img, ok := reader.ToImageRect(modeROI.X, modeROI.Y, modeROI.Width, modeROI.Height); ok {
+					partyAutomaticOCRBusy = true
+					generation := partyAutomaticGeneration
+					go func(img image.Image, area ClickSkillROI, generation uint64) {
+						result, err := partyAutomaticOCR.RunPartyModeTextImage(img)
+						event := partyAutomaticOCREvent{area: area, generation: generation, err: err}
+						if result != nil {
+							event.text = result.Text
+						}
+						select {
+						case partyAutomaticOCRResultCh <- event:
+						case <-stopCh:
+						}
+					}(img, area, generation)
+				} else {
+					appendOCRLog("PARTY MODE OCR | selected area outside capture | ROI=%d,%d %dx%d", modeROI.X, modeROI.Y, modeROI.Width, modeROI.Height)
 				}
 			}
 		}
