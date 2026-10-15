@@ -41,6 +41,7 @@ type BotConfig struct {
 	TargetEnabled      bool
 	TargetDelay        time.Duration
 	ClickMode          bool
+	KeypressMode       bool
 	ClickWhitelistMode bool
 
 	AttackEnabled bool
@@ -175,6 +176,31 @@ func (b *BotController) ClickMethodEnabled() bool {
 	return b.config.ClickMode
 }
 
+// PopupClickMethodEnabled is true for modes that retain Click Method's
+// pointer-based popup flows (party, resurrection, DC, and chat invites).
+func (b *BotController) PopupClickMethodEnabled() bool {
+	if b == nil {
+		return false
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.config.ClickMode || b.config.KeypressMode
+}
+
+// pressCombatKey chooses the configured keyboard delivery path. Keypress
+// Method uses SendInput (a real foreground key press); Keyboard Method keeps
+// the existing targeted WM_KEYDOWN behavior.
+func (b *BotController) pressCombatKey(vk uintptr) bool {
+	b.mu.Lock()
+	keypressMode := b.config.KeypressMode
+	hwnd := b.hwnd
+	b.mu.Unlock()
+	if keypressMode {
+		return pressKeyToForegroundWindow(hwnd, vk)
+	}
+	return pressKeyToWindow(hwnd, vk)
+}
+
 // inputQueueSpacing gives independent timer loops a short input frame to finish
 // handling a hotkey. The shared input lane prevents overlapping window messages.
 const inputQueueSpacing = 80 * time.Millisecond
@@ -188,10 +214,16 @@ const clickInputSpacing = 200 * time.Millisecond
 const popupDoubleClickDelay = 250 * time.Millisecond
 
 const (
-	partyInviteArmDelay        = 350 * time.Millisecond
-	partyInviteCharacterTries  = 3
-	partyInviteRetryGap        = 120 * time.Millisecond
-	partyInvitePostClickSettle = 350 * time.Millisecond
+	// The Party action has a visible in-game activation phase before the
+	// character can be selected. Keep this deliberately longer than a normal
+	// UI click so lower-frame-rate clients do not consume the character click
+	// as a regular world click.
+	partyInviteArmDelay       = 700 * time.Millisecond
+	partyInviteCharacterTries = 3
+	partyInviteRetryGap       = 120 * time.Millisecond
+	// Hold recurring skills after the character click while the server/UI
+	// registers the party invitation; the full transaction holds popupPending.
+	partyInvitePostClickSettle = 700 * time.Millisecond
 )
 
 // ============================================================
@@ -1060,7 +1092,7 @@ func (b *BotController) castBuffSkillForRun(skill SkillConfig, stop <-chan struc
 				if !b.canRunSkill(skill) {
 					return false
 				}
-				return pressKeyToWindow(b.hwnd, skill.VK)
+				return b.pressCombatKey(skill.VK)
 			},
 		)
 		b.castMu.Unlock()
@@ -1159,7 +1191,7 @@ func (b *BotController) castSkillForRun(skill SkillConfig, stop <-chan struct{})
 				b.observeVirtualClickResult(nil)
 				return true
 			}
-			return pressKeyToWindow(b.hwnd, skill.VK)
+			return b.pressCombatKey(skill.VK)
 		},
 	)
 }
@@ -1233,7 +1265,7 @@ func (b *BotController) CastEmergencySkill(skill WebEmergencySkillConfig) bool {
 			b.observeVirtualClickResult(nil)
 			return true
 		}
-		return pressKeyToWindow(b.hwnd, skill.VK)
+		return b.pressCombatKey(skill.VK)
 	})
 	if sent {
 		b.holdNormalSkillsFor(emergencyAttackHold)
@@ -1252,7 +1284,7 @@ func (b *BotController) CastPriorityKeyAction(name string, vk uintptr) bool {
 	defer atomic.AddInt32(&b.emergencyPending, -1)
 
 	sent := b.castInputWithTargetGateForRunPriority(name, true, stop, inputPriorityEmergency, func() bool {
-		return pressKeyToWindow(b.hwnd, vk)
+		return b.pressCombatKey(vk)
 	})
 	if sent {
 		b.holdNormalSkillsFor(emergencyAttackHold)
@@ -1539,7 +1571,7 @@ func (b *BotController) castKeyWithTargetGate(
 
 func (b *BotController) castKeyForRun(name string, vk uintptr, bypassTargetGate bool, stop <-chan struct{}) bool {
 	return b.castInputWithTargetGateForRun(name, bypassTargetGate, stop, func() bool {
-		return pressKeyToWindow(b.hwnd, vk)
+		return b.pressCombatKey(vk)
 	})
 }
 

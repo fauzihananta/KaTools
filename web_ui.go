@@ -1014,13 +1014,14 @@ body.click-input-mode #deathROIInfo, body.click-input-mode #deathROIPreview { di
 		<h2>Input Method</h2>
 		<div class="target-mode-options">
 			<label class="target-mode-option"><input type="radio" name="targetInputMethod" value="keyboard" checked disabled> Keyboard Method</label>
+			<label class="target-mode-option"><input type="radio" name="targetInputMethod" value="keypress" disabled> Keypress Method</label>
 			<label class="target-mode-option"><input type="radio" name="targetInputMethod" value="click" disabled> Click Method</label>
 		</div>
 		<div id="clickTargetBehavior" class="target-mode-options" hidden>
 			<label class="target-mode-option"><input type="radio" name="clickTargetBehavior" value="withoutName" checked> Without Name</label>
 			<label class="target-mode-option"><input type="radio" name="clickTargetBehavior" value="whitelist"> Whitelist Target</label>
 		</div>
-		<div class="hint">Keyboard Method keeps the current keyboard behavior. Click Method uses the existing click behavior for target, skills, and potions, and clicks the saved areas for Auto Accept, Auto Resu, and DC dialog OK. The picker returns to KaTools, and the cursor returns after each click.</div>
+		<div class="hint">Keyboard Method keeps the current direct-window keyboard behavior. Keypress Method sends combat keys through Windows and uses Click Method's saved areas for party, resu, DC, and chat invites; the game must remain focused. Click Method uses saved click areas for combat and popup actions. The picker returns to KaTools, and the cursor returns after each click.</div>
 	</div>
 
 	<div class="section" id="targetPanelAreaSection">
@@ -1162,7 +1163,7 @@ body.click-input-mode #deathROIInfo, body.click-input-mode #deathROIPreview { di
 					<label for="chatTextClickYOffset">Click below detected text (px)</label>
 					<input type="number" class="numeric-input" id="chatTextClickYOffset" min="0" max="200" step="1" value="100">
 				</div>
-				<div class="hint">Available in Keyboard and Click Method. When the phrase is found, KaTools clicks the saved Party pointer first, then clicks below the floating text to invite that character.</div>
+				<div class="hint">Available in Keyboard, Keypress, and Click Method. When the phrase is found, KaTools clicks the saved Party pointer first, then clicks below the floating text to invite that character.</div>
 			</div>
 		</div>
 
@@ -1330,9 +1331,9 @@ body.click-input-mode #deathROIInfo, body.click-input-mode #deathROIPreview { di
 
 	<div class="section" id="normalNumberSkillsSection">
 
-		<h2 id="normalNumberSkillsTitle">Skills</h2>
+		<h2 id="normalNumberSkillsTitle">1 - 0</h2>
 
-		<div class="hint" id="skillInputHint">Slots 1–0. Buff Skills on F1–F10 always have priority during timing clashes.</div>
+		<div class="hint" id="skillInputHint">Choose keys from 1 - 0. F1 - F10 always have priority during timing clashes.</div>
 		<div class="hint" id="skillLiveApplyStatus" role="status" aria-live="polite"></div>
 		<div class="skills-grid">
 
@@ -1383,9 +1384,9 @@ body.click-input-mode #deathROIInfo, body.click-input-mode #deathROIPreview { di
 
 	<div class="section" id="normalFunctionSkillsSection">
 
-		<h2 id="normalFunctionSkillsTitle">Buff Skills</h2>
+		<h2 id="normalFunctionSkillsTitle">F1 - F10</h2>
 
-		<div class="hint">Pre-fires ~300ms early and always wins timing clashes against slots 1–0.</div>
+		<div class="hint">F1 - F10 pre-fire ~300ms early and always win timing clashes against 1 - 0.</div>
 
 		<div class="skills-grid">
 
@@ -1701,6 +1702,11 @@ function ensureClickTargetToggles() {
 function getTargetInputMethod() {
 	const selected = document.querySelector('input[name="targetInputMethod"]:checked');
 	return selected ? selected.value : "keyboard";
+}
+
+function usesPopupClickMethod() {
+	const method = getTargetInputMethod();
+	return method === "click" || method === "keypress";
 }
 
 function isClickWhitelistMode() {
@@ -2872,7 +2878,7 @@ async function loadPartyROI() {
 }
 
 function updateAutoAcceptAvailability(selected) {
-	if (getTargetInputMethod() === "click") return;
+	if (usesPopupClickMethod()) return;
 	const checkbox = document.getElementById("autoAccept");
 	const label = document.querySelector('label[for="autoAccept"]');
 	const accept = document.getElementById("partyInviteAccept");
@@ -2908,7 +2914,7 @@ async function loadDeathROI() {
 }
 
 function updateAutoPauseDeathAvailability(selected) {
-	if (getTargetInputMethod() === "click") return;
+	if (usesPopupClickMethod()) return;
 	const checkbox = document.getElementById("autoPauseDeath");
 	const label = document.querySelector('label[for="autoPauseDeath"]');
 	const autoResurrect = document.getElementById("autoResurrect");
@@ -2952,8 +2958,8 @@ async function loadClickPopupScanAreas() {
 				delete preview.dataset.objectUrl;
 				preview.removeAttribute("src");
 				preview.style.display = "none";
-				if (getTargetInputMethod() === "click" && kind === "party") updateAutoAcceptClickAvailability(false);
-				if (getTargetInputMethod() === "click" && kind === "death") updateAutoPauseDeathClickAvailability(false);
+				if (usesPopupClickMethod() && kind === "party") updateAutoAcceptClickAvailability(false);
+				if (usesPopupClickMethod() && kind === "death") updateAutoPauseDeathClickAvailability(false);
 				continue;
 			}
 			status.textContent = "Scan area: X=" + result.x + " Y=" + result.y + " W=" + result.w + " H=" + result.h + (result.custom ? " (custom)" : " (default)");
@@ -2971,8 +2977,8 @@ async function loadClickPopupScanAreas() {
 					preview.style.display = "none";
 				}
 			} catch (_) { preview.style.display = "none"; }
-			if (getTargetInputMethod() === "click" && kind === "party") updateAutoAcceptClickAvailability(true);
-			if (getTargetInputMethod() === "click" && kind === "death") updateAutoPauseDeathClickAvailability(true);
+			if (usesPopupClickMethod() && kind === "party") updateAutoAcceptClickAvailability(true);
+			if (usesPopupClickMethod() && kind === "death") updateAutoPauseDeathClickAvailability(true);
 		} catch (error) {
 			console.error("Failed to load Click popup scan area:", kind, error);
 		}
@@ -3017,8 +3023,8 @@ async function resetClickPopupScanArea(kind) {
 	const response = await fetch("/api/click-popup-scan/reset?kind=" + encodeURIComponent(kind), { method: "POST" });
 	const result = await response.json();
 	if (!result.success) { alert(result.message || "Failed to reset popup scan area."); return; }
-	if (getTargetInputMethod() === "click" && kind === "party") updateAutoAcceptClickAvailability(false);
-	if (getTargetInputMethod() === "click" && kind === "death") updateAutoPauseDeathClickAvailability(false);
+	if (usesPopupClickMethod() && kind === "party") updateAutoAcceptClickAvailability(false);
+	if (usesPopupClickMethod() && kind === "death") updateAutoPauseDeathClickAvailability(false);
 	await loadClickPopupScanAreas();
 	scheduleLiveConfig();
 }
@@ -3126,13 +3132,13 @@ function syncSkillPresentation(clickMode) {
 		});
 	}
 
-	document.getElementById("normalNumberSkillsTitle").textContent = clickMode ? "Attack Skills" : "Skills";
-	document.getElementById("normalFunctionSkillsTitle").textContent = "Buff Skills";
+	document.getElementById("normalNumberSkillsTitle").textContent = clickMode ? "Attack Skills" : "1 - 0";
+	document.getElementById("normalFunctionSkillsTitle").textContent = clickMode ? "Buff Skills" : "F1 - F10";
 	const buffHint = document.querySelector("#normalFunctionSkillsSection > .hint");
 	if (buffHint) {
 		buffHint.textContent = clickMode
 			? "Set a click area and repeat interval for each Buff Skill."
-			: "Pre-fires ~300ms early and always wins timing clashes against slots 1-0.";
+		: "F1 - F10 pre-fire ~300ms early and always win timing clashes against 1 - 0.";
 	}
 }
 
@@ -3140,6 +3146,7 @@ function syncTargetMode() {
 	ensureClickTargetToggles();
 	const windowReady = hasSelectedTargetWindow();
 	const clickMode = getTargetInputMethod() === "click";
+	const popupClickMode = usesPopupClickMethod();
 	// Both Party Invite actions use their own saved pointers in every input
 	// method; Keyboard Method changes combat skills only, not popup actions.
 	const partyInviteAccept = document.getElementById("partyInviteAccept");
@@ -3161,9 +3168,9 @@ function syncTargetMode() {
 	document.getElementById("keyboardActionsGrid").hidden = clickMode;
 	document.getElementById("autoPotClickHint").hidden = !clickMode;
 	const globalClickAreas = document.getElementById("clickGlobalActionAreas");
-	if (globalClickAreas) globalClickAreas.hidden = !clickMode;
+	if (globalClickAreas) globalClickAreas.hidden = !popupClickMode;
 	const clickPopupScans = document.getElementById("clickPopupScanAreas");
-	if (clickPopupScans) clickPopupScans.hidden = !clickMode;
+	if (clickPopupScans) clickPopupScans.hidden = !popupClickMode;
 	const chatTextSettings = document.getElementById("chatTextClickSettings");
 	if (chatTextSettings) chatTextSettings.hidden = false;
 	document.getElementById("chatTextClickEnabled").disabled = !windowReady;
@@ -3171,7 +3178,7 @@ function syncTargetMode() {
 	document.getElementById("chatTextClickYOffset").disabled = !windowReady;
 	for (const id of ["partyROIInfo", "partyROIPreview", "deathROIInfo", "deathROIPreview"]) {
 		const element = document.getElementById(id);
-		if (element) element.hidden = clickMode;
+		if (element) element.hidden = popupClickMode;
 	}
 	document.getElementById("autoPotHPSlot").hidden = clickMode;
 	document.getElementById("autoPotTPSlot").hidden = clickMode;
@@ -3210,18 +3217,20 @@ function syncTargetMode() {
 	for (const extraSkill of document.querySelectorAll(".click-only-skill")) {
 		extraSkill.hidden = !clickMode && supportMode;
 	}
-	// These three controls drive the cross-method Party Invite flow. They use
-	// virtual mouse clicks even while combat skills use Keyboard Method, so do
-	// not hide them with the regular Click Method skill controls.
-	const partyInviteControls = new Set([
+	// Popup and Party actions retain their virtual-click controls in Keypress
+	// Method. Combat click areas remain exclusive to Click Method, so Keypress
+	// shows the normal 1-0 / F1-F10 key-based skill controls instead.
+	const popupAndPartyClickControls = new Set([
 		"clickAreaControlsAutoAccept",
 		"clickAreaControlsAutoReject",
+		"clickAreaControlsAutoResu",
+		"clickAreaControlsDCOk",
 		"clickAreaControlsChatParty",
 		"clickAreaControlsPartyAutomatic",
 		"chatTextInviteControls",
 	]);
 	for (const controls of document.querySelectorAll(".click-area-controls")) {
-		controls.hidden = !clickMode && !partyInviteControls.has(controls.id);
+		controls.hidden = !clickMode && !(popupClickMode && popupAndPartyClickControls.has(controls.id));
 	}
 	document.getElementById("attackActionCard").hidden = clickMode;
 	document.getElementById("pickActionCard").hidden = clickMode;
@@ -3615,7 +3624,7 @@ document.addEventListener("change", function(event) {
 		syncTargetMode();
 	}
 	if (event.target.id === "autoPauseDeath") {
-		if (getTargetInputMethod() === "click") loadClickPopupScanAreas();
+		if (usesPopupClickMethod()) loadClickPopupScanAreas();
 		else loadDeathROI();
 	}
 	if (event.target.id === "autoPotHP" || event.target.classList.contains("emergency-check") || event.target.classList.contains("emergency-needs-target")) {
@@ -3698,11 +3707,22 @@ func (cfg WebBotConfig) ClickMethod() bool {
 	switch strings.ToLower(strings.TrimSpace(cfg.InputMethod)) {
 	case "click":
 		return true
-	case "keyboard":
+	case "keyboard", "keypress":
 		return false
 	default:
 		return cfg.TargetWithClick
 	}
+}
+
+// KeypressMethod sends combat keys through SendInput. It deliberately remains
+// distinct from ClickMethod: skills and potions use keys, while popup actions
+// reuse the Click Method's saved pointers and scan areas.
+func (cfg WebBotConfig) KeypressMethod() bool {
+	return strings.EqualFold(strings.TrimSpace(cfg.InputMethod), "keypress")
+}
+
+func (cfg WebBotConfig) PopupClickMethod() bool {
+	return cfg.ClickMethod() || cfg.KeypressMethod()
 }
 
 func normalizeInputMethod(cfg *WebBotConfig) {
@@ -3712,6 +3732,9 @@ func normalizeInputMethod(cfg *WebBotConfig) {
 	if cfg.ClickMethod() {
 		cfg.InputMethod = "click"
 		cfg.TargetWithClick = true
+	} else if cfg.KeypressMethod() {
+		cfg.InputMethod = "keypress"
+		cfg.TargetWithClick = false
 	} else {
 		cfg.InputMethod = "keyboard"
 		cfg.TargetWithClick = false
@@ -3789,10 +3812,10 @@ func validateAutoResurrectConfig(cfg WebBotConfig) string {
 	if !cfg.AutoPauseDeathEnabled {
 		return "Enable Auto Pause on Death before enabling Auto Resu."
 	}
-	if cfg.ClickMethod() && !LoadClickPopupScanAreas()["death"].ROI.Selected {
+	if cfg.PopupClickMethod() && !LoadClickPopupScanAreas()["death"].ROI.Selected {
 		return "Select the Click Death / Resu scan area before enabling Auto Resu."
 	}
-	if !cfg.ClickMethod() && !LoadDeathROI().Selected {
+	if !cfg.PopupClickMethod() && !LoadDeathROI().Selected {
 		return "Select the full death dialog area before enabling Auto Resu."
 	}
 	if cfg.AutoPotHPPercent <= 0 {
@@ -3946,7 +3969,7 @@ func validateClickActionAreas(cfg WebBotConfig) string {
 			return "Set the Party Invite " + label + " pointer before starting."
 		}
 	}
-	if !cfg.ClickMethod() {
+	if !cfg.PopupClickMethod() {
 		return ""
 	}
 	if cfg.AutoResurrectEnabled && !areas["AutoResu"].Selected {
@@ -4870,7 +4893,7 @@ func newWebUIMux(
 				return
 			}
 
-			if cfg.AutoAcceptEnabled && ((!cfg.ClickMethod() && !ocrworker.LoadPartyROI().Selected) || (cfg.ClickMethod() && !LoadClickPopupScanAreas()["party"].ROI.Selected)) {
+			if cfg.AutoAcceptEnabled && ((!cfg.PopupClickMethod() && !ocrworker.LoadPartyROI().Selected) || (cfg.PopupClickMethod() && !LoadClickPopupScanAreas()["party"].ROI.Selected)) {
 				writeJSONError(w, "Select Party OCR area before enabling Auto Party Invite.")
 				return
 			}
@@ -4878,7 +4901,7 @@ func newWebUIMux(
 				writeJSONError(w, "Select the HP / TP status area before enabling Auto Potion.")
 				return
 			}
-			if cfg.AutoPauseDeathEnabled && ((!cfg.ClickMethod() && !LoadDeathROI().Selected) || (cfg.ClickMethod() && !LoadClickPopupScanAreas()["death"].ROI.Selected)) {
+			if cfg.AutoPauseDeathEnabled && ((!cfg.PopupClickMethod() && !LoadDeathROI().Selected) || (cfg.PopupClickMethod() && !LoadClickPopupScanAreas()["death"].ROI.Selected)) {
 				writeJSONError(w, "Select the death dialog area before enabling Auto Pause on Death.")
 				return
 			}
@@ -5023,7 +5046,7 @@ func newWebUIMux(
 				return
 			}
 
-			if cfg.AutoAcceptEnabled && ((!cfg.ClickMethod() && !ocrworker.LoadPartyROI().Selected) || (cfg.ClickMethod() && !LoadClickPopupScanAreas()["party"].ROI.Selected)) {
+			if cfg.AutoAcceptEnabled && ((!cfg.PopupClickMethod() && !ocrworker.LoadPartyROI().Selected) || (cfg.PopupClickMethod() && !LoadClickPopupScanAreas()["party"].ROI.Selected)) {
 				writeJSONError(
 					w,
 					"Select Party OCR area before enabling Auto Party Invite.",
@@ -5039,7 +5062,7 @@ func newWebUIMux(
 				return
 			}
 
-			if cfg.AutoPauseDeathEnabled && ((!cfg.ClickMethod() && !LoadDeathROI().Selected) || (cfg.ClickMethod() && !LoadClickPopupScanAreas()["death"].ROI.Selected)) {
+			if cfg.AutoPauseDeathEnabled && ((!cfg.PopupClickMethod() && !LoadDeathROI().Selected) || (cfg.PopupClickMethod() && !LoadClickPopupScanAreas()["death"].ROI.Selected)) {
 				writeJSONError(
 					w,
 					"Select the death dialog area before enabling Auto Pause on Death.",
@@ -5338,6 +5361,7 @@ func applyWebBotConfig(
 			len(cfg.Skills)+len(cfg.SupportSkills),
 		)
 	bot.config.ClickMode = cfg.ClickMethod()
+	bot.config.KeypressMode = cfg.KeypressMethod()
 	bot.config.ClickWhitelistMode = cfg.ClickMethod() && cfg.ClickWhitelistMode
 	if supportMode {
 		for _, skill := range cfg.SupportSkills {

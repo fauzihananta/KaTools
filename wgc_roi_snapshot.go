@@ -154,7 +154,7 @@ func (m *RuntimeManager) CaptureConfiguredWGCROISnapshots() {
 		}})
 	}
 	m.mu.RLock()
-	clickMode := m.bot != nil && m.bot.ClickMethodEnabled()
+	clickMode := m.bot != nil && m.bot.PopupClickMethodEnabled()
 	hwnd := m.hwnd
 	m.mu.RUnlock()
 	if clickMode {

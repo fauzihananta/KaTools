@@ -26,20 +26,33 @@ func TestPausedStatusExplainsHotkeyStopsRuntime(t *testing.T) {
 	}
 }
 
-func TestChatKeywordPartyInviteIsAvailableInKeyboardAndClickModes(t *testing.T) {
+func TestChatKeywordPartyInviteIsAvailableInAllInputModes(t *testing.T) {
 	for _, token := range []string{
+		`value="keypress"`,
 		"Chat keyword party invite",
-		"Available in Keyboard and Click Method.",
+		"Available in Keyboard, Keypress, and Click Method.",
 		"chatTextClickEnabled: document.getElementById(\"chatTextClickEnabled\").checked,",
 		"clickAreaControlsChatParty",
 		"clickAreaControlsPartyAutomatic",
 		"clickAreaControlsAutoAccept",
 		"clickAreaControlsAutoReject",
 		"chatTextInviteControls",
+		"popupAndPartyClickControls",
 		".roi-picker-row[hidden] { display: none !important; }",
 	} {
 		if !strings.Contains(webUIHTML, token) {
 			t.Fatalf("web UI is missing shared party-invite token %q", token)
 		}
+	}
+}
+
+func TestNormalizeInputMethodPreservesKeypress(t *testing.T) {
+	cfg := WebBotConfig{InputMethod: "keypress", TargetWithClick: true}
+	normalizeInputMethod(&cfg)
+	if !cfg.KeypressMethod() || !cfg.PopupClickMethod() {
+		t.Fatalf("keypress mode was not preserved: %+v", cfg)
+	}
+	if cfg.ClickMethod() || cfg.TargetWithClick {
+		t.Fatalf("keypress mode incorrectly became Click Method: %+v", cfg)
 	}
 }

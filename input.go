@@ -18,6 +18,8 @@ var (
 )
 
 const (
+	inputKeyboard              = 1
+	keyEventFKeyUp             = 0x0002
 	wmKeyDown                  = 0x0100
 	wmKeyUp                    = 0x0101
 	wmMouseMove                = 0x0200
@@ -37,8 +39,28 @@ const (
 	clipCursorLockSize         = 10 // pixel radius around target to lock cursor
 )
 
+// windowsInput is the x64 INPUT layout used by SendInput. The padding keeps
+// the union the same size as a MOUSEINPUT union member (40 bytes total).
+// KaTools is a Windows x64 application.
+type windowsKeyboardInput struct {
+	VK        uint16
+	Scan      uint16
+	Flags     uint32
+	Time      uint32
+	ExtraInfo uintptr
+}
+
+type windowsInput struct {
+	Type     uint32
+	Pad      uint32
+	Keyboard windowsKeyboardInput
+	UnionPad [8]byte
+}
+
 var (
 	user32DLL                  = syscall.NewLazyDLL("user32.dll")
+	procSendInput              = user32DLL.NewProc("SendInput")
+	procGetForegroundWindow    = user32DLL.NewProc("GetForegroundWindow")
 	procSendMessageTimeoutW    = user32DLL.NewProc("SendMessageTimeoutW")
 	procChildWindowFromPointEx = user32DLL.NewProc("ChildWindowFromPointEx")
 	procMapWindowPoints        = user32DLL.NewProc("MapWindowPoints")
@@ -130,6 +152,49 @@ func pressKeyToWindow(hwnd uintptr, vk uintptr) bool {
 		return false
 	}
 	return true
+}
+
+// pressKey sends a normal keyboard down/up pair through Windows' SendInput
+// path. Unlike pressKeyToWindow, it follows the foreground window, matching a
+// real physical key press. The caller is responsible for choosing this only
+// when the selected game is active.
+func pressKey(vk uintptr) bool {
+	if vk == 0 {
+		return false
+	}
+
+	inputs := [2]windowsInput{
+		{Type: inputKeyboard, Keyboard: windowsKeyboardInput{VK: uint16(vk)}},
+		{Type: inputKeyboard, Keyboard: windowsKeyboardInput{VK: uint16(vk), Flags: keyEventFKeyUp}},
+	}
+	count, _, callErr := procSendInput.Call(
+		uintptr(len(inputs)),
+		uintptr(unsafe.Pointer(&inputs[0])),
+		unsafe.Sizeof(inputs[0]),
+	)
+	if count != uintptr(len(inputs)) {
+		if callErr != syscall.Errno(0) {
+			fmt.Printf("[Input] SendInput key 0x%X failed: %v\\n", vk, callErr)
+		} else {
+			fmt.Printf("[Input] SendInput key 0x%X sent %d/%d events\\n", vk, count, len(inputs))
+		}
+		return false
+	}
+	return true
+}
+
+// pressKeyToForegroundWindow keeps Keypress Method from leaking a combat key
+// into another application after Alt+Tab. SendInput itself cannot target an
+// HWND, so the selected game must be the active foreground window.
+func pressKeyToForegroundWindow(hwnd uintptr, vk uintptr) bool {
+	if hwnd == 0 || vk == 0 {
+		return false
+	}
+	foreground, _, _ := procGetForegroundWindow.Call()
+	if foreground != hwnd {
+		return false
+	}
+	return pressKey(vk)
 }
 
 func resolveMouseMessageTarget(hwnd uintptr, x, y int) (uintptr, int, int) {

@@ -1704,7 +1704,7 @@ func runPicker(
 	_ = hideROIConfigFiles()
 
 	partyScanROI := func() ocrworker.PartyROIConfig {
-		if bot != nil && bot.ClickMethodEnabled() {
+		if bot != nil && bot.PopupClickMethodEnabled() {
 			if area, ok := LoadClickPopupScanAreaForClient("party", clientWidth, clientHeight); ok {
 				return area.ROI
 			}
@@ -1712,7 +1712,7 @@ func runPicker(
 		return ocrworker.LoadPartyROI()
 	}
 	popupScanROI := func(kind string) ocrworker.PartyROIConfig {
-		if bot != nil && bot.ClickMethodEnabled() {
+		if bot != nil && bot.PopupClickMethodEnabled() {
 			if area, ok := LoadClickPopupScanAreaForClient(kind, clientWidth, clientHeight); ok {
 				return area.ROI
 			}
@@ -1728,11 +1728,10 @@ func runPicker(
 	)
 
 	popupROI := automaticPopupROI(reader.width, reader.height)
-	if bot != nil && bot.ClickMethodEnabled() {
+	if bot != nil && bot.PopupClickMethodEnabled() {
 		popupROI = partyROIToFrame(partyScanROI(), scaleX, scaleY, frameOriginX, frameOriginY)
 	}
 	popupDetector := newPartyDetector(popupROI)
-	partyMembership := &PartyMembershipMonitor{}
 
 	// ========================================================
 	// FRAME STATE
@@ -1890,7 +1889,6 @@ func runPicker(
 	var statusCalibrationROI ocrworker.PartyROIConfig
 	statusCalibrationROISet := false
 	var lastStatusFrameNumber uint64
-	var lastPartyPanelCheck time.Time
 	var lastTargetBarAt time.Time
 	var targetROIOutsideScans int
 	var lastTargetROIInvalidDiagnosticAt time.Time
@@ -1933,7 +1931,6 @@ func runPicker(
 		roi.Y += captureOffsetY
 		return roi
 	}
-	const partyPanelCheckInterval = 1500 * time.Millisecond
 	const targetBarInterval = 250 * time.Millisecond
 	const targetNameOCRMinInterval = 500 * time.Millisecond
 	const targetValidationSettleDelay = 180 * time.Millisecond
@@ -2303,6 +2300,7 @@ func runPicker(
 	// or keyboard keys and how many skill slots it actually received.
 	bot.mu.Lock()
 	clickMode := bot.config.ClickMode
+	keypressMode := bot.config.KeypressMode
 	enabledSkills := 0
 	for _, skill := range bot.config.Skills {
 		if skill.Enabled {
@@ -2315,6 +2313,8 @@ func runPicker(
 	inputMethod := "keyboard"
 	if clickMode {
 		inputMethod = "click"
+	} else if keypressMode {
+		inputMethod = "keypress"
 	}
 	appendOCRLog("BOT START | Input=%s | Active skills=%d | Target filter=%t | Chat paused=%t", inputMethod, enabledSkills, targetGate, chatPaused)
 
@@ -2734,7 +2734,7 @@ func runPicker(
 			if dcNotification.Observe(texts) {
 				sent := false
 				method := "Enter"
-				if bot.ClickMethodEnabled() {
+				if bot.PopupClickMethodEnabled() {
 					method = "click"
 					if area, ok := LoadClickSkillROIs()["DCOk"]; ok && area.Selected {
 						sent = bot.CastClickAction("DCOk", uintptr(hwnd), area.X+area.Width/2, area.Y+area.Height/2, area.ClientWidth, area.ClientHeight, popupDoubleClickDelay, false)
@@ -2787,7 +2787,7 @@ func runPicker(
 				deathPause.ObserveResurrectionPrompt(true) {
 				sent := false
 				method := "Enter"
-				if bot.ClickMethodEnabled() {
+				if bot.PopupClickMethodEnabled() {
 					method = "click"
 					if area, ok := LoadClickSkillROIs()["AutoResu"]; ok && area.Selected {
 						sent = bot.CastClickAction("AutoResu", uintptr(hwnd), area.X+area.Width/2, area.Y+area.Height/2, area.ClientWidth, area.ClientHeight, popupDoubleClickDelay, true)
@@ -2906,10 +2906,6 @@ func runPicker(
 
 							lastPartyInviteAt =
 								time.Now()
-							if action == partyInviteAccept {
-								partyMembership.ExpectPanel()
-							}
-
 							fmt.Printf(
 								"[PartyInvite] %s sent to HWND 0x%X\n",
 								action,
@@ -3200,7 +3196,7 @@ func runPicker(
 		lastDetectorRun =
 			time.Now()
 		chatEnabled, chatKeyword, chatYOffset := chatTextClick.Snapshot()
-		if chatEnabled && strings.TrimSpace(chatKeyword) != "" && !chatTextOCRBusy && time.Since(lastChatTextScanAt) >= 900*time.Millisecond {
+		if chatEnabled && strings.TrimSpace(chatKeyword) != "" && !chatTextOCRBusy && time.Since(lastChatTextScanAt) >= 700*time.Millisecond {
 			picked := LoadChatTextROI()
 			if picked.ROI.Selected {
 				roi := partyROIToFrame(picked.ROI, scaleX, scaleY, frameOriginX, frameOriginY)
@@ -3252,17 +3248,6 @@ func runPicker(
 		}
 
 		partyScannerEnabled := autoAccept != nil && autoAccept.IsEnabled()
-		if partyScannerEnabled && time.Since(lastPartyPanelCheck) >= partyPanelCheckInterval {
-			lastPartyPanelCheck = time.Now()
-			visible, changed := partyMembership.Update(reader)
-			if changed {
-				if visible {
-					appendOCRLog("PARTY PANEL DETECTED | Auto Party OCR paused")
-				} else {
-					appendOCRLog("PARTY PANEL CLEARED | Auto Party OCR resumed")
-				}
-			}
-		}
 
 		// A configured PartyAutomatic rectangle is intentionally optional. It is
 		// a compact text crop, not a colour probe: OCR reads the leader's state
@@ -3296,19 +3281,23 @@ func runPicker(
 			}
 		}
 
-		if partyScannerEnabled && !partyMembership.ShouldPause() {
+		// Keep the configured Party Area armed even while the game shows its
+		// party panel. The old panel-bar heuristic could mistake unrelated HUD
+		// bars for that panel and disable both the visual detector and OCR, which
+		// made a real invite invisible to the log and to Accept/Reject.
+		if partyScannerEnabled {
 			// ====================================================
 			// VISUAL DETECTOR
 			// ====================================================
 
-			if bot != nil && bot.ClickMethodEnabled() {
+			if bot != nil && bot.PopupClickMethodEnabled() {
 				popupROI = partyROIToFrame(partyScanROI(), scaleX, scaleY, frameOriginX, frameOriginY)
 				popupROI = applyCaptureOffset(popupROI)
 			} else {
 				popupROI = automaticPopupROI(reader.width, reader.height)
 			}
 			state := lastPopupState
-			if bot == nil || !bot.ClickMethodEnabled() || partyScanROI().Selected {
+			if bot == nil || !bot.PopupClickMethodEnabled() || partyScanROI().Selected {
 				state = popupDetector.update(reader, popupROI)
 			}
 
@@ -3362,7 +3351,7 @@ func runPicker(
 			lastDCDialogCheckAt = time.Now()
 			dcROI := dcNotificationROI(reader.width, reader.height)
 			dcScanAreaSelected := true
-			if bot != nil && bot.ClickMethodEnabled() {
+			if bot != nil && bot.PopupClickMethodEnabled() {
 				dcScanAreaSelected = false
 				if area, ok := LoadClickPopupScanAreaForClient("dc", clientWidth, clientHeight); ok && area.ROI.Selected {
 					mapped := applyCaptureOffset(partyROIToFrame(area.ROI, scaleX, scaleY, frameOriginX, frameOriginY))

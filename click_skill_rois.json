@@ -1,6 +1,6 @@
 {
   "1": {
-    "x": 1220,
+    "x": 1216,
     "y": 1196,
     "width": 1,
     "height": 1,
@@ -35,6 +35,15 @@
     "clientWidth": 1920,
     "clientHeight": 1440
   },
+  "7": {
+    "x": 1511,
+    "y": 1193,
+    "width": 1,
+    "height": 1,
+    "selected": true,
+    "clientWidth": 1920,
+    "clientHeight": 1440
+  },
   "9": {
     "x": 1610,
     "y": 1198,
@@ -45,8 +54,8 @@
     "clientHeight": 1440
   },
   "AutoAccept": {
-    "x": 936,
-    "y": 766,
+    "x": 933,
+    "y": 765,
     "width": 1,
     "height": 1,
     "selected": true,
@@ -54,7 +63,7 @@
     "clientHeight": 1440
   },
   "AutoReject": {
-    "x": 1067,
+    "x": 1065,
     "y": 763,
     "width": 1,
     "height": 1,
@@ -63,8 +72,8 @@
     "clientHeight": 1440
   },
   "AutoResu": {
-    "x": 931,
-    "y": 766,
+    "x": 938,
+    "y": 765,
     "width": 1,
     "height": 1,
     "selected": true,
@@ -72,8 +81,8 @@
     "clientHeight": 1440
   },
   "ChatParty": {
-    "x": 1320,
-    "y": 1249,
+    "x": 1662,
+    "y": 1247,
     "width": 1,
     "height": 1,
     "selected": true,
@@ -81,8 +90,8 @@
     "clientHeight": 1440
   },
   "DCOk": {
-    "x": 1066,
-    "y": 765,
+    "x": 1061,
+    "y": 768,
     "width": 1,
     "height": 1,
     "selected": true,
@@ -153,10 +162,10 @@
     "clientHeight": 1440
   },
   "PartyAutomatic": {
-    "x": 1,
-    "y": 739,
+    "x": 0,
+    "y": 747,
     "width": 99,
-    "height": 33,
+    "height": 24,
     "selected": true,
     "clientWidth": 1920,
     "clientHeight": 1440
