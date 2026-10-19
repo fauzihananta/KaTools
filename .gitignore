@@ -7,6 +7,7 @@ cursor_hook.dll
 
 # Runtime state and logs
 katools_config.json
+katools_game_launch.json
 katools_ocr.log
 katools_ocr.previous.log
 katools_hotkey.log

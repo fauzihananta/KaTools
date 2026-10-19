@@ -241,8 +241,9 @@ func refocusKaToolsWindow() {
 
 func focusWindow(targetHWND windows.Handle) {
 	// Windows normally blocks a background process from stealing focus. The
-	// picker was explicitly requested by the user, so temporarily join the
-	// foreground input queue before asking Windows to activate its window.
+	// requested KaTools action (ROI picker or runtime start) explicitly targets
+	// this window, so temporarily join the foreground input queue before asking
+	// Windows to activate it.
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 

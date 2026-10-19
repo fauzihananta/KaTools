@@ -37,7 +37,14 @@ func TestChatKeywordPartyInviteIsAvailableInAllInputModes(t *testing.T) {
 		"clickAreaControlsAutoAccept",
 		"clickAreaControlsAutoReject",
 		"chatTextInviteControls",
+		"chat-text-invite-controls",
+		"keyboardPopupScanAreas",
+		"isSharedChatInviteControl",
+		"isKeyboardPopupScanControl",
 		"popupAndPartyClickControls",
+		"isPopupScanControl",
+		"isAutoLoginControl",
+		"openClickPopupScanPicker('dc')",
 		".roi-picker-row[hidden] { display: none !important; }",
 	} {
 		if !strings.Contains(webUIHTML, token) {
@@ -54,5 +61,67 @@ func TestNormalizeInputMethodPreservesKeypress(t *testing.T) {
 	}
 	if cfg.ClickMethod() || cfg.TargetWithClick {
 		t.Fatalf("keypress mode incorrectly became Click Method: %+v", cfg)
+	}
+}
+
+func TestKeyboardMethodUsesSharedClickPopupFlows(t *testing.T) {
+	cfg := WebBotConfig{InputMethod: "keyboard"}
+	normalizeInputMethod(&cfg)
+	if !cfg.PopupClickMethod() {
+		t.Fatalf("keyboard method must use shared click popup flows: %+v", cfg)
+	}
+	if cfg.ClickMethod() || cfg.KeypressMethod() {
+		t.Fatalf("keyboard combat input changed while enabling click popups: %+v", cfg)
+	}
+	for _, token := range []string{
+		`method === "keyboard" || method === "keypress" || method === "click"`,
+		"All methods use the same saved click areas for party, resu, DC, and chat invites.",
+	} {
+		if !strings.Contains(webUIHTML, token) {
+			t.Fatalf("keyboard popup UI is missing token %q", token)
+		}
+	}
+}
+
+func TestWebUIIncludesGameLauncherControls(t *testing.T) {
+	for _, token := range []string{
+		`data-tab="autoLogin"`,
+		`id="autoLoginTab"`,
+		`id="gameLaunchSection"`,
+		`id="autoLoginEnabled"`,
+		`id="chooseGameFolderButton"`,
+		`id="gameExecutableSelect"`,
+		`clickAreaControlsAutoLoginCharacter`,
+		`clickAreaControlsAutoLoginOK`,
+		`clickAreaControlsAutoLoginAutoHunt`,
+		`openClickSkillPicker('AutoLoginCharacter')`,
+		`openClickSkillPicker('AutoLoginOK')`,
+		`openClickSkillPicker('AutoLoginAutoHunt')`,
+		`#launchGameButton`,
+		`function syncAutoLoginControls()`,
+		`id="autoLoginCharacterSet"`,
+		`id="autoLoginOKSet"`,
+		`id="autoLoginAutoHuntSet"`,
+		`/api/game-launch/run`,
+		`/api/game-launch/enabled`,
+		`function loadGameLauncher()`,
+		`autoLoginDCScanReady`,
+		`autoLoginDCScanGuide`,
+		`OPEN DC SCAN AREA`,
+		`id="autoLoginRunAutoHunt"`,
+		`/api/game-launch/auto-hunt`,
+		`id="autoLoginAutoHuntKey"`,
+		`/api/game-launch/auto-hunt-key`,
+		`setAutoLoginAutoHuntKey()`,
+	} {
+		if !strings.Contains(webUIHTML, token) {
+			t.Fatalf("web UI is missing game launcher token %q", token)
+		}
+	}
+}
+
+func TestWebUINavigationRemainsUsableWithoutTargetWindow(t *testing.T) {
+	if !strings.Contains(webUIHTML, `:not(.tab-button):not(.auto-login-dc-guide-button):not(#scrollTopButton):not(#scrollBottomButton)`) {
+		t.Fatal("window-dependent control handling must not disable navigation")
 	}
 }

@@ -13,7 +13,7 @@ var clickSkillROIMu sync.Mutex
 
 var clickSkillSlots = []string{"1", "2", "3", "4", "5", "6", "7", "8", "9", "0", "F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10"}
 
-var clickActionSlots = []string{"AutoAccept", "AutoReject", "AutoResu", "DCOk", "ChatParty", "PartyAutomatic"}
+var clickActionSlots = []string{"AutoAccept", "AutoReject", "AutoResu", "DCOk", "ChatParty", "PartyAutomatic", "AutoLoginCharacter", "AutoLoginOK", "AutoLoginAutoHunt"}
 
 type ClickSkillROI struct {
 	X            int  `json:"x"`

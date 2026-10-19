@@ -41,6 +41,16 @@ func TestRegularVirtualClickYieldsToHigherPriorityInput(t *testing.T) {
 	}
 }
 
+func TestKeyboardControllerUsesSharedClickPopupFlow(t *testing.T) {
+	bot := NewBotController(0, BotConfig{})
+	if !bot.PopupClickMethodEnabled() {
+		t.Fatal("keyboard controller must keep the shared click popup flow")
+	}
+	if bot.ClickMethodEnabled() {
+		t.Fatal("keyboard controller unexpectedly changed combat input to Click Method")
+	}
+}
+
 func TestSkillPriorityGateOrdersEmergencyBuffAttack(t *testing.T) {
 	bot := NewBotController(0, BotConfig{})
 	if bot.normalSkillsBlocked() {

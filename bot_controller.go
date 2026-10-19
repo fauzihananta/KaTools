@@ -176,15 +176,11 @@ func (b *BotController) ClickMethodEnabled() bool {
 	return b.config.ClickMode
 }
 
-// PopupClickMethodEnabled is true for modes that retain Click Method's
-// pointer-based popup flows (party, resurrection, DC, and chat invites).
+// PopupClickMethodEnabled is true for every input method. Keyboard Method
+// changes combat-key delivery only; party, resurrection, DC, and chat invites
+// always use the shared pointer-based popup flow.
 func (b *BotController) PopupClickMethodEnabled() bool {
-	if b == nil {
-		return false
-	}
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return b.config.ClickMode || b.config.KeypressMode
+	return b != nil
 }
 
 // pressCombatKey chooses the configured keyboard delivery path. Keypress

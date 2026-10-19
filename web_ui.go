@@ -379,6 +379,67 @@ h2 {
   font-size: 12px;
 }
 
+.game-launch-folder {
+  overflow-wrap: anywhere;
+  margin-bottom: 8px;
+  color: var(--text-secondary);
+}
+
+.game-launch-actions {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 8px;
+}
+
+.game-launch-actions button {
+  margin: 0;
+  white-space: nowrap;
+}
+
+#chooseGameFolderButton {
+  background: var(--accent-blue-dim);
+  border: 1px solid var(--accent-blue);
+  color: var(--accent-blue);
+}
+
+#chooseGameFolderButton:hover { background: rgba(96,165,250,0.18); }
+
+#launchGameButton {
+  background: var(--accent-green-dim);
+  border: 1px solid var(--accent-green);
+  color: var(--accent-green);
+}
+
+#launchGameButton:hover { background: rgba(52,211,153,0.18); }
+
+#gameExecutableSelect {
+  color: var(--accent-cyan);
+  font-weight: 600;
+}
+
+#gameExecutableSelect:disabled { color: var(--text-muted); }
+#gameExecutableSelect option { background: var(--bg-base); color: var(--text-primary); }
+
+.auto-login-enable {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 12px;
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.auto-login-enable input { accent-color: var(--accent-cyan); }
+.auto-login-key {
+  width: 46px;
+  min-height: 30px;
+  margin-left: 4px;
+  padding: 3px 7px;
+  text-align: center;
+  text-transform: uppercase;
+}
+
 /* ---- Cards ---- */
 .panel-card {
   background: var(--bg-surface);
@@ -640,6 +701,10 @@ select:focus { border-color: var(--accent-cyan); box-shadow: 0 0 0 2px rgba(34,2
   border: 1px solid var(--border-subtle);
   min-width: 0;
 }
+.keyboard-popup-scan-area {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: stretch;
+}
 .click-popup-scan-preview {
   width: 100%;
   max-height: 150px;
@@ -730,6 +795,38 @@ select:focus { border-color: var(--accent-cyan); box-shadow: 0 0 0 2px rgba(34,2
   border-color: var(--accent-red);
 }
 .click-area-buttons button[onclick^="reset"]:hover { background: rgba(248,113,113,0.15); }
+
+/* Chat party invite is shared by every input method. Keep its controls in
+   deliberate fields instead of letting a generic flex row scatter them. */
+.chat-text-invite-controls {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) minmax(240px, 1.25fr) minmax(260px, 1.1fr) minmax(160px, 0.55fr);
+  align-items: end;
+  gap: 10px 14px;
+  margin-top: 10px;
+}
+.chat-text-invite-field { min-width: 0; }
+.chat-text-invite-field > label,
+.chat-text-invite-field > .roi-picker-title {
+  display: block;
+  margin-bottom: 5px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.chat-text-invite-field input[type="text"],
+.chat-text-invite-field input[type="number"] {
+  width: 100%;
+  box-sizing: border-box;
+}
+.chat-text-invite-field .click-area-controls {
+  min-height: 30px;
+}
+.chat-text-invite-scan .click-area-controls,
+.chat-text-invite-pointer .click-area-controls {
+  justify-content: flex-start;
+}
+.chat-text-invite-scan .click-area-status,
+.chat-text-invite-pointer .click-area-status { display: none; }
 
 /* ---- Support Skills ---- */
 .support-skills-grid { grid-template-columns: repeat(2, 1fr); }
@@ -896,7 +993,9 @@ button:disabled:hover { transform: none; }
   .app-header { flex-direction: column; align-items: flex-start; gap: 12px; }
   .actions-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .click-global-action-area { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .keyboard-popup-scan-area { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .click-popup-scan-card { min-width: 0; }
+  .chat-text-invite-controls { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .skills-grid { grid-template-columns: repeat(3, 1fr); }
   .pot-grid { grid-template-columns: 1fr; }
   .emergency-grid { grid-template-columns: repeat(2, 1fr); }
@@ -911,7 +1010,11 @@ button:disabled:hover { transform: none; }
   .refresh-button,
   .roi-picker-row > .party-picker-button { width: 100%; }
   .actions-grid,
-  .click-global-action-area { grid-template-columns: 1fr; }
+  .click-global-action-area,
+  .keyboard-popup-scan-area,
+  .chat-text-invite-controls { grid-template-columns: 1fr; }
+
+  .game-launch-actions { grid-template-columns: 1fr; }
   .action-card { grid-template-columns: auto minmax(0, 1fr) auto; }
   .config-actions { grid-template-columns: 1fr; }
   .scroll-nav { right: 7px; }
@@ -950,6 +1053,7 @@ body.click-input-mode #deathROIInfo, body.click-input-mode #deathROIPreview { di
 		<div class="tab-bar" role="tablist" aria-label="KaTools panels">
 			<button type="button" class="tab-button active" data-tab="main" onclick="showTab('main')">Bot</button>
 			<button type="button" class="tab-button" data-tab="emergency" onclick="showTab('emergency')">Emergency Skill</button>
+			<button type="button" class="tab-button" data-tab="autoLogin" onclick="showTab('autoLogin')">Auto Login</button>
 		</div>
 	</div>
 
@@ -1021,7 +1125,7 @@ body.click-input-mode #deathROIInfo, body.click-input-mode #deathROIPreview { di
 			<label class="target-mode-option"><input type="radio" name="clickTargetBehavior" value="withoutName" checked> Without Name</label>
 			<label class="target-mode-option"><input type="radio" name="clickTargetBehavior" value="whitelist"> Whitelist Target</label>
 		</div>
-		<div class="hint">Keyboard Method keeps the current direct-window keyboard behavior. Keypress Method sends combat keys through Windows and uses Click Method's saved areas for party, resu, DC, and chat invites; the game must remain focused. Click Method uses saved click areas for combat and popup actions. The picker returns to KaTools, and the cursor returns after each click.</div>
+		<div class="hint">Keyboard Method keeps direct-window keys for combat. All methods use the same saved click areas for party, resu, DC, and chat invites. Keypress Method sends combat keys through Windows; the game must remain focused. Click Method also uses saved click areas for combat. The picker returns to KaTools, and the cursor returns after each click.</div>
 	</div>
 
 	<div class="section" id="targetPanelAreaSection">
@@ -1153,45 +1257,40 @@ body.click-input-mode #deathROIInfo, body.click-input-mode #deathROIPreview { di
 		<div class="roi-picker-row" id="chatTextClickSettings" hidden>
 			<div>
 				<div class="roi-picker-title"><label><input type="checkbox" id="chatTextClickEnabled"> Chat keyword party invite</label></div>
-				<div class="click-area-controls" id="chatTextInviteControls">
-					<label for="chatTextClickKeyword">Keyword</label>
-					<input type="text" id="chatTextClickKeyword" placeholder="Add Party Please" autocomplete="off">
-					<span class="click-area-status" id="chatTextROIInfo">Scan area not set</span>
-					<div class="click-area-buttons"><button type="button" class="chat-scan-area-button" onclick="openChatTextPicker()">SET SCAN AREA</button></div>
-					<div class="roi-picker-title">Party action pointer</div>
-					<div class="click-area-controls" id="clickAreaControlsChatParty"><span class="click-area-status" id="clickAreaStatusChatParty">Pointer not set</span><div class="click-area-buttons"><button type="button" onclick="openClickSkillPicker('ChatParty')">SET PARTY POINTER</button><button type="button" id="clickAreaResetChatParty" onclick="resetClickSkillArea('ChatParty')">RESET</button></div></div>
-					<label for="chatTextClickYOffset">Click below detected text (px)</label>
-					<input type="number" class="numeric-input" id="chatTextClickYOffset" min="0" max="200" step="1" value="100">
+				<div class="chat-text-invite-controls" id="chatTextInviteControls">
+					<div class="chat-text-invite-field">
+						<label for="chatTextClickKeyword">Keyword</label>
+						<input type="text" id="chatTextClickKeyword" placeholder="Add Party Please" autocomplete="off">
+					</div>
+					<div class="chat-text-invite-field chat-text-invite-scan">
+						<label>Chat scan area</label>
+						<div class="click-area-controls"><span class="click-area-status" id="chatTextROIInfo">Scan area not set</span><div class="click-area-buttons"><button type="button" class="chat-scan-area-button" onclick="openChatTextPicker()">SET SCAN AREA</button></div></div>
+					</div>
+					<div class="chat-text-invite-field chat-text-invite-pointer">
+						<div class="roi-picker-title">Party action pointer</div>
+						<div class="click-area-controls" id="clickAreaControlsChatParty"><span class="click-area-status" id="clickAreaStatusChatParty">Pointer not set</span><div class="click-area-buttons"><button type="button" onclick="openClickSkillPicker('ChatParty')">SET PARTY POINTER</button><button type="button" id="clickAreaResetChatParty" onclick="resetClickSkillArea('ChatParty')">RESET</button></div></div>
+					</div>
+					<div class="chat-text-invite-field">
+						<label for="chatTextClickYOffset">Click below text (px)</label>
+						<input type="number" class="numeric-input" id="chatTextClickYOffset" min="0" max="200" step="1" value="100">
+					</div>
 				</div>
 				<div class="hint">Available in Keyboard, Keypress, and Click Method. When the phrase is found, KaTools clicks the saved Party pointer first, then clicks below the floating text to invite that character.</div>
 			</div>
 		</div>
 
-		<div
-			id="partyROIInfo"
-			class="party-roi-info">
-
-			Party OCR ROI: loading...
-
+		<div class="roi-picker-row keyboard-popup-scan-area" id="keyboardPopupScanAreas">
+			<div class="click-popup-scan-card">
+				<div class="roi-picker-title">Party popup scan area</div>
+				<div class="click-area-controls"><span id="partyROIInfo" class="click-area-status">Party OCR ROI: loading...</span><div class="click-area-buttons"><button type="button" class="chat-scan-area-button" onclick="openPartyPicker()">SET SCAN AREA</button><button type="button" onclick="resetROI('party')">RESET</button></div></div>
+				<img id="partyROIPreview" class="party-roi-preview click-popup-scan-preview" alt="Selected Party OCR area preview">
+			</div>
+			<div class="click-popup-scan-card">
+				<div class="roi-picker-title">Death / Resu popup scan area</div>
+				<div class="click-area-controls"><span id="deathROIInfo" class="click-area-status">Death dialog ROI: select the full Message dialog first</span><div class="click-area-buttons"><button type="button" class="chat-scan-area-button" onclick="openDeathPicker()">SET SCAN AREA</button><button type="button" onclick="resetROI('death')">RESET</button></div></div>
+				<img id="deathROIPreview" class="party-roi-preview click-popup-scan-preview" alt="Selected death dialog area preview">
+			</div>
 		</div>
-
-		<img
-			id="partyROIPreview"
-			class="party-roi-preview"
-			alt="Selected Party OCR area preview">
-
-		<div
-			id="deathROIInfo"
-			class="party-roi-info">
-
-			Death dialog ROI: select the full Message dialog first
-
-		</div>
-
-		<img
-			id="deathROIPreview"
-			class="party-roi-preview"
-			alt="Selected death dialog area preview">
 
 		<div class="section">
 			<h2>Auto Potion</h2>
@@ -1509,6 +1608,42 @@ body.click-input-mode #deathROIInfo, body.click-input-mode #deathROIPreview { di
 		</div>
 	</div>
 
+	<div id="autoLoginTab" class="tab-panel">
+		<div class="section" id="gameLaunchSection">
+			<h2>Auto Login</h2>
+			<label class="auto-login-enable" id="autoLoginEnabledLabel" for="autoLoginEnabled">
+				<input type="checkbox" id="autoLoginEnabled" onchange="setAutoLoginEnabled()">
+				Enable Auto Login
+			</label>
+			<label class="auto-login-enable" for="autoLoginRunAutoHunt">
+				<input type="checkbox" id="autoLoginRunAutoHunt" onchange="setAutoLoginRunAutoHunt()">
+				Run Auto Hunt after login
+			</label>
+			<label class="auto-login-enable" for="autoLoginAutoHuntKey">
+				Auto Hunt key
+				<input type="text" id="autoLoginAutoHuntKey" class="auto-login-key" value="Y" maxlength="1" autocomplete="off" onchange="setAutoLoginAutoHuntKey()">
+			</label>
+			<div class="hint" id="autoLoginDCScanGuide" hidden>Set the <strong>DC popup scan area</strong> first: open Bot, select Keyboard, Keypress, or Click Method, then use <strong>SET SCAN AREA</strong> in the DC popup scan area card. <button type="button" class="auto-login-dc-guide-button" onclick="openAutoLoginDCScanSetup()">OPEN DC SCAN AREA</button></div>
+			<div class="window-panel">
+				<div id="gameLaunchFolder" class="window-info game-launch-folder">No game folder selected.</div>
+				<div class="game-launch-actions">
+					<button type="button" class="game-launch-button" id="chooseGameFolderButton" onclick="chooseGameFolder()">CHOOSE FOLDER</button>
+					<select id="gameExecutableSelect" class="window-select" onchange="selectGameExecutable()" disabled>
+						<option value="">Choose a game folder first</option>
+					</select>
+					<button type="button" class="game-launch-button" id="launchGameButton" onclick="launchGame()" disabled>RUN GAME</button>
+				</div>
+				<div id="gameLaunchInfo" class="window-info">Choose the folder containing the game's .exe file.</div>
+			</div>
+			<div class="roi-picker-row" id="autoLoginPointerAreas">
+				<div><div class="roi-picker-title">Select Character pointer</div><div class="click-area-controls" id="clickAreaControlsAutoLoginCharacter"><span class="click-area-status" id="clickAreaStatusAutoLoginCharacter">Pointer not set</span><div class="click-area-buttons"><button type="button" id="autoLoginCharacterSet" onclick="openClickSkillPicker('AutoLoginCharacter')">SET POINTER</button><button type="button" id="clickAreaResetAutoLoginCharacter" onclick="resetClickSkillArea('AutoLoginCharacter')">RESET</button></div></div></div>
+				<div><div class="roi-picker-title">Login OK pointer</div><div class="click-area-controls" id="clickAreaControlsAutoLoginOK"><span class="click-area-status" id="clickAreaStatusAutoLoginOK">Pointer not set</span><div class="click-area-buttons"><button type="button" id="autoLoginOKSet" onclick="openClickSkillPicker('AutoLoginOK')">SET POINTER</button><button type="button" id="clickAreaResetAutoLoginOK" onclick="resetClickSkillArea('AutoLoginOK')">RESET</button></div></div></div>
+				<div><div class="roi-picker-title">Activate Auto Hunt pointer</div><div class="click-area-controls" id="clickAreaControlsAutoLoginAutoHunt"><span class="click-area-status" id="clickAreaStatusAutoLoginAutoHunt">Pointer not set</span><div class="click-area-buttons"><button type="button" id="autoLoginAutoHuntSet" onclick="openClickSkillPicker('AutoLoginAutoHunt')">SET POINTER</button><button type="button" id="clickAreaResetAutoLoginAutoHunt" onclick="resetClickSkillArea('AutoLoginAutoHunt')">RESET</button></div></div></div>
+			</div>
+			<div class="hint">Run the game and select its window in the Bot tab before setting pointers. When enabled, DC recovery waits 30 seconds before opening the game, then waits 35 seconds, sends two virtual Enters 6 seconds apart, selects the character, waits 10 seconds, clicks Login OK twice 3 seconds apart, waits 10 seconds, then sends the configured Auto Hunt key and activates Auto Hunt.</div>
+		</div>
+	</div>
+
 </div>
 
 <nav class="scroll-nav" aria-label="Page navigation">
@@ -1527,6 +1662,7 @@ const emergencySkillOptions = [
 ];
 
 let botRuntimeActive = false;
+let autoLoginDCScanReady = false;
 // Keep the first call-to-action simple. Once the bot has run during this page
 // session, the button can advertise the Alt+F12 toggle shortcut instead.
 let botHasStarted = false;
@@ -1663,7 +1799,7 @@ const supportSkillSlots = [
 	["1", 0x31], ["2", 0x32], ["3", 0x33], ["4", 0x34], ["5", 0x35]
 ];
 
-const clickSkillSlots = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "0", "F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10", "HP", "TP", "AutoAccept", "AutoReject", "AutoResu", "DCOk", "ChatParty", "PartyAutomatic"];
+const clickSkillSlots = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "0", "F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10", "HP", "TP", "AutoAccept", "AutoReject", "AutoResu", "DCOk", "ChatParty", "PartyAutomatic", "AutoLoginCharacter", "AutoLoginOK", "AutoLoginAutoHunt"];
 clickSkillSlots.push("Emergency1", "Emergency2", "Emergency3", "Emergency4", "Emergency5");
 
 function clickSkillUsesScanArea(slot) {
@@ -1706,7 +1842,9 @@ function getTargetInputMethod() {
 
 function usesPopupClickMethod() {
 	const method = getTargetInputMethod();
-	return method === "click" || method === "keypress";
+	// Combat input remains method-specific, but every method shares the
+	// pointer-based popup flow for party, resurrection, DC, and chat invites.
+	return method === "keyboard" || method === "keypress" || method === "click";
 }
 
 function isClickWhitelistMode() {
@@ -1728,8 +1866,10 @@ async function loadClickSkillAreas() {
 			const selected = !!(area && area.selected);
 			const label = clickSkillUsesScanArea(slot) ? "Area" : "Pointer";
 			status.textContent = selected ? label + " set" : label + " not set";
-			reset.disabled = !selected || !hasSelectedTargetWindow();
+			const autoLoginSlot = slot.startsWith("AutoLogin");
+			reset.disabled = !selected || !hasSelectedTargetWindow() || (autoLoginSlot && !document.getElementById("autoLoginEnabled").checked);
 		}
+		syncAutoLoginControls();
 	} catch (error) {
 		console.error("Failed to load click skill areas:", error);
 	}
@@ -2240,6 +2380,23 @@ let savedWindowHWND = "";
 let clickSkillApplyRevision = 0;
 let clickSkillApplyRunning = false;
 
+// Auto Login starts the bot again on a newly-created game HWND. Keep the
+// dashboard selection aligned with that runtime target so later live-setting
+// changes never point back at the disconnected instance.
+function syncRuntimeWindowSelection(hwnd) {
+	if (!hwnd || savedWindowHWND === hwnd) {
+		return;
+	}
+	const select = document.getElementById("windowSelect");
+	savedWindowHWND = hwnd;
+	if (select) {
+		select.value = "";
+	}
+	if (!windowsLoading) {
+		loadWindows();
+	}
+}
+
 function scheduleLiveConfig() {
 
 	if (liveConfigTimer) {
@@ -2587,6 +2744,7 @@ async function updateStatus() {
 		onlineAccessAllowed = !!access.allowed;
 		if (accessWasAllowed !== onlineAccessAllowed) {
 			updateWindowDependentControls();
+			if (onlineAccessAllowed) loadGameLauncher();
 		}
 		if (!onlineAccessAllowed) {
 			botRuntimeActive = false;
@@ -2604,6 +2762,7 @@ async function updateStatus() {
 		botRuntimeActive = !!(result.running || result.starting);
 		if (botRuntimeActive) {
 			botHasStarted = true;
+			syncRuntimeWindowSelection(result.hwnd);
 		}
 
 		if (result.starting) {
@@ -2686,7 +2845,11 @@ function updateAppTitle() {
 function updateWindowDependentControls() {
 	const ready = hasSelectedTargetWindow();
 
-	for (const button of document.querySelectorAll("button:not(.refresh-button)")) {
+	// A target window is required for bot actions, but never for navigation.
+	// In particular, a manual game launch starts with no selectable game HWND;
+	// keeping the tabs and page navigation live lets the user go to Bot and
+	// refresh/select the new window instead of having to restart KaTools.
+	for (const button of document.querySelectorAll("button:not(.refresh-button):not(.game-launch-button):not(.tab-button):not(.auto-login-dc-guide-button):not(#scrollTopButton):not(#scrollBottomButton)")) {
 		button.disabled = !ready;
 	}
 
@@ -2706,6 +2869,7 @@ function updateWindowDependentControls() {
 		for (const id of ["autoPotHPPercent", "autoPotHPSlot", "autoPotTPPercent", "autoPotTPSlot"]) {
 			document.getElementById(id).disabled = true;
 		}
+		syncAutoLoginControls();
 		return;
 	}
 
@@ -2718,6 +2882,205 @@ function updateWindowDependentControls() {
 	loadStatusROI();
 	syncTargetMode();
 	syncEmergencySkillSlots();
+	syncAutoLoginControls();
+}
+
+function renderGameLauncher(config, executables) {
+	const folder = (config && config.folder) || "";
+	const selectedExe = (config && config.exe) || "";
+	const select = document.getElementById("gameExecutableSelect");
+	const launchButton = document.getElementById("launchGameButton");
+	const folderLabel = document.getElementById("gameLaunchFolder");
+	const info = document.getElementById("gameLaunchInfo");
+	document.getElementById("autoLoginEnabled").checked = !!(config && config.enabled && autoLoginDCScanReady && onlineAccessAllowed);
+	document.getElementById("autoLoginRunAutoHunt").checked = !config || config.runAutoHunt !== false;
+	document.getElementById("autoLoginAutoHuntKey").value = (config && config.autoHuntKey) || "Y";
+	folderLabel.textContent = folder ? "Game folder: " + folder : "No game folder selected.";
+	select.innerHTML = "";
+	const placeholder = document.createElement("option");
+	placeholder.value = "";
+	placeholder.textContent = folder ? "Select the game executable..." : "Choose a game folder first";
+	select.appendChild(placeholder);
+	for (const executable of executables || []) {
+		const option = document.createElement("option");
+		option.value = executable;
+		option.textContent = executable;
+		select.appendChild(option);
+	}
+	select.value = selectedExe;
+	if (select.value !== selectedExe) select.value = "";
+	select.disabled = !folder || !(executables || []).length || gameLaunchBusy;
+	launchButton.disabled = !selectedExe || gameLaunchBusy;
+	if (!folder) info.textContent = "Choose the folder containing the game's .exe file.";
+	else if (!(executables || []).length) info.textContent = "No .exe file was found directly in this folder.";
+	else if (!selectedExe) info.textContent = "Select the executable used to open the game.";
+	syncAutoLoginControls();
+}
+
+function syncAutoLoginControls() {
+	const checkbox = document.getElementById("autoLoginEnabled");
+	const enabledLabel = document.getElementById("autoLoginEnabledLabel");
+	const guide = document.getElementById("autoLoginDCScanGuide");
+	const dcScanMessage = "Set the DC popup scan area first: Bot tab → Keyboard, Keypress, or Click Method → DC popup scan area → SET SCAN AREA.";
+	const accessMessage = "Online access is required before Auto Login can be enabled.";
+	const canUseAutoLogin = onlineAccessAllowed && autoLoginDCScanReady;
+	if (!onlineAccessAllowed) checkbox.checked = false;
+	checkbox.disabled = !canUseAutoLogin;
+	checkbox.title = canUseAutoLogin ? "" : (onlineAccessAllowed ? dcScanMessage : accessMessage);
+	enabledLabel.title = canUseAutoLogin ? "" : (onlineAccessAllowed ? dcScanMessage : accessMessage);
+	guide.hidden = !onlineAccessAllowed || autoLoginDCScanReady;
+	const enabled = checkbox.checked && canUseAutoLogin;
+	document.getElementById("autoLoginRunAutoHunt").disabled = !enabled;
+	document.getElementById("autoLoginAutoHuntKey").disabled = !enabled;
+	const folder = document.getElementById("gameLaunchFolder").textContent !== "No game folder selected.";
+	const select = document.getElementById("gameExecutableSelect");
+	const selectedExe = select.value;
+	document.getElementById("chooseGameFolderButton").disabled = !enabled || gameLaunchBusy;
+	select.disabled = !enabled || !folder || select.options.length <= 1 || gameLaunchBusy;
+	document.getElementById("launchGameButton").disabled = !enabled || !selectedExe || gameLaunchBusy;
+	const windowReady = hasSelectedTargetWindow();
+	for (const id of ["autoLoginCharacterSet", "autoLoginOKSet", "autoLoginAutoHuntSet"]) {
+		document.getElementById(id).disabled = !enabled || !windowReady;
+	}
+	const autoLoginResetSlots = {
+		clickAreaResetAutoLoginCharacter: "AutoLoginCharacter",
+		clickAreaResetAutoLoginOK: "AutoLoginOK",
+		clickAreaResetAutoLoginAutoHunt: "AutoLoginAutoHunt"
+	};
+	for (const id of Object.keys(autoLoginResetSlots)) {
+		const button = document.getElementById(id);
+		const slot = autoLoginResetSlots[id];
+		const status = document.getElementById("clickAreaStatus" + slot);
+		button.disabled = !enabled || !windowReady || !status || status.textContent !== "Pointer set";
+	}
+}
+
+function openAutoLoginDCScanSetup() {
+	showTab("main");
+	const section = document.getElementById("clickPopupScanAreas");
+	if (section) section.scrollIntoView({ behavior: "smooth", block: "center" });
+}
+
+async function setAutoLoginEnabled() {
+	const enabled = document.getElementById("autoLoginEnabled").checked;
+	syncAutoLoginControls();
+	try {
+		const response = await fetch("/api/game-launch/enabled", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ enabled: enabled }) });
+		const result = await response.json();
+		if (!result.success) throw new Error(result.message || "Failed to update Auto Login.");
+	} catch (error) {
+		console.error("Failed to update Auto Login:", error);
+		alert(error.message || "Failed to update Auto Login.");
+	} finally {
+		await loadGameLauncher();
+	}
+}
+
+async function setAutoLoginRunAutoHunt() {
+	const runAutoHunt = document.getElementById("autoLoginRunAutoHunt").checked;
+	try {
+		const response = await fetch("/api/game-launch/auto-hunt", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ runAutoHunt: runAutoHunt }) });
+		const result = await response.json();
+		if (!result.success) throw new Error(result.message || "Failed to update Run Auto Hunt.");
+	} catch (error) {
+		console.error("Failed to update Run Auto Hunt:", error);
+		alert(error.message || "Failed to update Run Auto Hunt.");
+	} finally {
+		await loadGameLauncher();
+	}
+}
+
+async function setAutoLoginAutoHuntKey() {
+	const input = document.getElementById("autoLoginAutoHuntKey");
+	const autoHuntKey = input.value.trim().toUpperCase();
+	input.value = autoHuntKey;
+	try {
+		const response = await fetch("/api/game-launch/auto-hunt-key", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ autoHuntKey: autoHuntKey }) });
+		const result = await response.json();
+		if (!result.success) throw new Error(result.message || "Auto Hunt key must be one letter from A to Z.");
+	} catch (error) {
+		console.error("Failed to update Auto Hunt key:", error);
+		alert(error.message || "Failed to update Auto Hunt key.");
+	} finally {
+		await loadGameLauncher();
+	}
+}
+
+let gameLaunchBusy = false;
+
+async function loadGameLauncher() {
+	try {
+		const response = await fetch("/api/game-launch", { cache: "no-store" });
+		const result = await response.json();
+		if (!result.success) throw new Error(result.message || "Failed to load game launcher settings.");
+		autoLoginDCScanReady = !!result.dcScanReady;
+		renderGameLauncher(result.config || {}, result.executables || []);
+	} catch (error) {
+		console.error("Failed to load game launcher settings:", error);
+		document.getElementById("gameLaunchInfo").textContent = error.message || "Failed to load game launcher settings.";
+	}
+}
+
+async function chooseGameFolder() {
+	if (gameLaunchBusy) return;
+	gameLaunchBusy = true;
+	document.getElementById("chooseGameFolderButton").disabled = true;
+	document.getElementById("gameLaunchInfo").textContent = "Waiting for a game folder...";
+	try {
+		const response = await fetch("/api/game-launch/folder", { method: "POST" });
+		const result = await response.json();
+		if (!result.success) throw new Error(result.message || "Failed to select game folder.");
+		if (result.cancelled) {
+			document.getElementById("gameLaunchInfo").textContent = "Game folder selection cancelled.";
+			return;
+		}
+		renderGameLauncher(result.config || {}, result.executables || []);
+	} catch (error) {
+		console.error("Failed to select game folder:", error);
+		alert(error.message || "Failed to select game folder.");
+	} finally {
+		gameLaunchBusy = false;
+		document.getElementById("chooseGameFolderButton").disabled = false;
+		await loadGameLauncher();
+	}
+}
+
+async function selectGameExecutable() {
+	const executable = document.getElementById("gameExecutableSelect").value;
+	if (!executable || gameLaunchBusy) return;
+	gameLaunchBusy = true;
+	try {
+		const response = await fetch("/api/game-launch/executable", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ exe: executable }) });
+		const result = await response.json();
+		if (!result.success) throw new Error(result.message || "Failed to select game executable.");
+		await loadGameLauncher();
+	} catch (error) {
+		console.error("Failed to select game executable:", error);
+		alert(error.message || "Failed to select game executable.");
+	} finally {
+		gameLaunchBusy = false;
+		await loadGameLauncher();
+	}
+}
+
+async function launchGame() {
+	if (gameLaunchBusy) return;
+	gameLaunchBusy = true;
+	document.getElementById("launchGameButton").disabled = true;
+	document.getElementById("gameLaunchInfo").textContent = "Starting selected game...";
+	try {
+		const response = await fetch("/api/game-launch/run", { method: "POST" });
+		const result = await response.json();
+		if (!result.success) throw new Error(result.message || "Failed to start the selected game executable.");
+		document.getElementById("gameLaunchInfo").textContent = "Started " + result.config.exe + ". Once its window appears, select it below.";
+		setTimeout(loadWindows, 1200);
+	} catch (error) {
+		console.error("Failed to start game:", error);
+		alert(error.message || "Failed to start the selected game executable.");
+	} finally {
+		gameLaunchBusy = false;
+		await loadGameLauncher();
+	}
 }
 
 async function loadWindows() {
@@ -2953,6 +3316,10 @@ async function loadClickPopupScanAreas() {
 			const status = document.getElementById("clickPopupScanStatus" + suffix);
 			const preview = document.getElementById("clickPopupScanPreview" + suffix);
 			if (!result.success || !result.selected) {
+				if (kind === "dc") {
+					autoLoginDCScanReady = false;
+					syncAutoLoginControls();
+				}
 				status.textContent = "Scan area not set";
 				if (preview.dataset.objectUrl) URL.revokeObjectURL(preview.dataset.objectUrl);
 				delete preview.dataset.objectUrl;
@@ -2961,6 +3328,10 @@ async function loadClickPopupScanAreas() {
 				if (usesPopupClickMethod() && kind === "party") updateAutoAcceptClickAvailability(false);
 				if (usesPopupClickMethod() && kind === "death") updateAutoPauseDeathClickAvailability(false);
 				continue;
+			}
+			if (kind === "dc") {
+				autoLoginDCScanReady = !!result.custom;
+				syncAutoLoginControls();
 			}
 			status.textContent = "Scan area: X=" + result.x + " Y=" + result.y + " W=" + result.w + " H=" + result.h + (result.custom ? " (custom)" : " (default)");
 			try {
@@ -3171,6 +3542,8 @@ function syncTargetMode() {
 	if (globalClickAreas) globalClickAreas.hidden = !popupClickMode;
 	const clickPopupScans = document.getElementById("clickPopupScanAreas");
 	if (clickPopupScans) clickPopupScans.hidden = !popupClickMode;
+	const keyboardPopupScans = document.getElementById("keyboardPopupScanAreas");
+	if (keyboardPopupScans) keyboardPopupScans.hidden = popupClickMode;
 	const chatTextSettings = document.getElementById("chatTextClickSettings");
 	if (chatTextSettings) chatTextSettings.hidden = false;
 	document.getElementById("chatTextClickEnabled").disabled = !windowReady;
@@ -3217,9 +3590,9 @@ function syncTargetMode() {
 	for (const extraSkill of document.querySelectorAll(".click-only-skill")) {
 		extraSkill.hidden = !clickMode && supportMode;
 	}
-	// Popup and Party actions retain their virtual-click controls in Keypress
-	// Method. Combat click areas remain exclusive to Click Method, so Keypress
-	// shows the normal 1-0 / F1-F10 key-based skill controls instead.
+	// Popup and Party actions retain their virtual-click controls in every
+	// method. Combat click areas remain exclusive to Click Method, so Keyboard
+	// and Keypress keep the normal 1-0 / F1-F10 key-based skill controls.
 	const popupAndPartyClickControls = new Set([
 		"clickAreaControlsAutoAccept",
 		"clickAreaControlsAutoReject",
@@ -3230,7 +3603,11 @@ function syncTargetMode() {
 		"chatTextInviteControls",
 	]);
 	for (const controls of document.querySelectorAll(".click-area-controls")) {
-		controls.hidden = !clickMode && !(popupClickMode && popupAndPartyClickControls.has(controls.id));
+		const isPopupScanControl = !!controls.closest("#clickPopupScanAreas");
+		const isKeyboardPopupScanControl = !!controls.closest("#keyboardPopupScanAreas");
+		const isAutoLoginControl = !!controls.closest("#autoLoginPointerAreas");
+		const isSharedChatInviteControl = controls.id === "chatTextInviteControls" || controls.id === "clickAreaControlsChatParty";
+		controls.hidden = !isAutoLoginControl && !isKeyboardPopupScanControl && !isSharedChatInviteControl && !clickMode && !(popupClickMode && (popupAndPartyClickControls.has(controls.id) || isPopupScanControl));
 	}
 	document.getElementById("attackActionCard").hidden = clickMode;
 	document.getElementById("pickActionCard").hidden = clickMode;
@@ -3534,6 +3911,7 @@ async function initializeUI() {
 	buildEmergencySkills();
 	buildSupportSkills();
 	updateWindowDependentControls();
+	await loadGameLauncher();
 	await loadWindows();
 	loadPartyROI();
 	loadPartyPreview();
@@ -3633,7 +4011,7 @@ document.addEventListener("change", function(event) {
 	if (event.target.classList.contains("support-skill-check")) {
 		syncSupportSkillSlots();
 	}
-	if (event.target.id !== "windowSelect" && !clickSkillScheduleChanged) {
+	if (event.target.id !== "windowSelect" && event.target.id !== "gameExecutableSelect" && event.target.id !== "autoLoginEnabled" && !clickSkillScheduleChanged) {
 		scheduleLiveConfig();
 	}
 });
@@ -3715,14 +4093,16 @@ func (cfg WebBotConfig) ClickMethod() bool {
 }
 
 // KeypressMethod sends combat keys through SendInput. It deliberately remains
-// distinct from ClickMethod: skills and potions use keys, while popup actions
-// reuse the Click Method's saved pointers and scan areas.
+// distinct from ClickMethod: skills and potions use keys.
 func (cfg WebBotConfig) KeypressMethod() bool {
 	return strings.EqualFold(strings.TrimSpace(cfg.InputMethod), "keypress")
 }
 
+// PopupClickMethod is shared by every normalized input method. Keyboard
+// Method changes combat-key delivery only; party, resurrection, DC, and chat
+// popups always use the saved click pointers and scan areas.
 func (cfg WebBotConfig) PopupClickMethod() bool {
-	return cfg.ClickMethod() || cfg.KeypressMethod()
+	return true
 }
 
 func normalizeInputMethod(cfg *WebBotConfig) {
@@ -4149,6 +4529,161 @@ func newWebUIMux(
 			)
 		},
 	)
+
+	// ========================================================
+	// GAME LAUNCHER
+	// ========================================================
+
+	mux.HandleFunc("/api/game-launch", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		cfg, err := loadGameLaunchConfig()
+		if err != nil {
+			writeJSONError(w, err.Error())
+			return
+		}
+		executables := []string{}
+		if cfg.Folder != "" {
+			if executables, err = listGameExecutables(cfg.Folder); err != nil {
+				cfg.EXE = ""
+				executables = []string{}
+			}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success":     true,
+			"config":      cfg,
+			"executables": executables,
+			"dcScanReady": autoLoginDCScanConfigured(),
+		})
+	})
+
+	mux.HandleFunc("/api/game-launch/folder", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		folder, selected, err := pickGameFolder()
+		if err != nil {
+			writeJSONError(w, err.Error())
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if !selected {
+			json.NewEncoder(w).Encode(map[string]interface{}{"success": true, "cancelled": true})
+			return
+		}
+		cfg, executables, err := selectGameLaunchFolder(folder)
+		if err != nil {
+			writeJSONError(w, err.Error())
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success":     true,
+			"config":      cfg,
+			"executables": executables,
+		})
+	})
+
+	mux.HandleFunc("/api/game-launch/executable", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		var request struct {
+			EXE string `json:"exe"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			writeJSONError(w, "Invalid JSON: "+err.Error())
+			return
+		}
+		cfg, err := selectGameLaunchExecutable(request.EXE)
+		if err != nil {
+			writeJSONError(w, err.Error())
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{"success": true, "config": cfg})
+	})
+
+	mux.HandleFunc("/api/game-launch/enabled", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		var request struct {
+			Enabled bool `json:"enabled"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			writeJSONError(w, "Invalid JSON: "+err.Error())
+			return
+		}
+		cfg, err := setGameLaunchEnabled(request.Enabled)
+		if err != nil {
+			writeJSONError(w, err.Error())
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{"success": true, "config": cfg})
+	})
+
+	mux.HandleFunc("/api/game-launch/auto-hunt", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		var request struct {
+			RunAutoHunt bool `json:"runAutoHunt"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			writeJSONError(w, "Invalid JSON: "+err.Error())
+			return
+		}
+		cfg, err := setGameLaunchAutoHunt(request.RunAutoHunt)
+		if err != nil {
+			writeJSONError(w, err.Error())
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{"success": true, "config": cfg})
+	})
+
+	mux.HandleFunc("/api/game-launch/auto-hunt-key", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		var request struct {
+			AutoHuntKey string `json:"autoHuntKey"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			writeJSONError(w, "Invalid JSON: "+err.Error())
+			return
+		}
+		cfg, err := setGameLaunchAutoHuntKey(request.AutoHuntKey)
+		if err != nil {
+			writeJSONError(w, err.Error())
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{"success": true, "config": cfg})
+	})
+
+	mux.HandleFunc("/api/game-launch/run", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		cfg, err := launchConfiguredGame()
+		if err != nil {
+			writeJSONError(w, err.Error())
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{"success": true, "config": cfg})
+	})
 
 	// ========================================================
 	// STATUS

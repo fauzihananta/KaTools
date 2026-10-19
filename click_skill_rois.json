@@ -9,8 +9,8 @@
     "clientHeight": 1440
   },
   "2": {
-    "x": 1269,
-    "y": 1193,
+    "x": 1737,
+    "y": 907,
     "width": 1,
     "height": 1,
     "selected": true,
@@ -18,35 +18,17 @@
     "clientHeight": 1440
   },
   "3": {
-    "x": 1316,
-    "y": 1195,
+    "x": 1740,
+    "y": 953,
     "width": 1,
     "height": 1,
     "selected": true,
     "clientWidth": 1920,
     "clientHeight": 1440
   },
-  "5": {
-    "x": 1417,
-    "y": 1197,
-    "width": 1,
-    "height": 1,
-    "selected": true,
-    "clientWidth": 1920,
-    "clientHeight": 1440
-  },
-  "7": {
-    "x": 1511,
-    "y": 1193,
-    "width": 1,
-    "height": 1,
-    "selected": true,
-    "clientWidth": 1920,
-    "clientHeight": 1440
-  },
-  "9": {
-    "x": 1610,
-    "y": 1198,
+  "4": {
+    "x": 1742,
+    "y": 1002,
     "width": 1,
     "height": 1,
     "selected": true,
@@ -56,6 +38,33 @@
   "AutoAccept": {
     "x": 933,
     "y": 765,
+    "width": 1,
+    "height": 1,
+    "selected": true,
+    "clientWidth": 1920,
+    "clientHeight": 1440
+  },
+  "AutoLoginAutoHunt": {
+    "x": 871,
+    "y": 586,
+    "width": 1,
+    "height": 1,
+    "selected": true,
+    "clientWidth": 1920,
+    "clientHeight": 1440
+  },
+  "AutoLoginCharacter": {
+    "x": 961,
+    "y": 860,
+    "width": 1,
+    "height": 1,
+    "selected": true,
+    "clientWidth": 1920,
+    "clientHeight": 1440
+  },
+  "AutoLoginOK": {
+    "x": 243,
+    "y": 537,
     "width": 1,
     "height": 1,
     "selected": true,
@@ -81,8 +90,8 @@
     "clientHeight": 1440
   },
   "ChatParty": {
-    "x": 1662,
-    "y": 1247,
+    "x": 1743,
+    "y": 1248,
     "width": 1,
     "height": 1,
     "selected": true,
@@ -90,8 +99,8 @@
     "clientHeight": 1440
   },
   "DCOk": {
-    "x": 1061,
-    "y": 768,
+    "x": 1062,
+    "y": 762,
     "width": 1,
     "height": 1,
     "selected": true,
@@ -107,54 +116,9 @@
     "clientWidth": 1920,
     "clientHeight": 1440
   },
-  "F1": {
-    "x": 1564,
-    "y": 1193,
-    "width": 1,
-    "height": 1,
-    "selected": true,
-    "clientWidth": 1920,
-    "clientHeight": 1440
-  },
-  "F2": {
-    "x": 1608,
-    "y": 1197,
-    "width": 1,
-    "height": 1,
-    "selected": true,
-    "clientWidth": 1920,
-    "clientHeight": 1440
-  },
-  "F3": {
-    "x": 1413,
-    "y": 1197,
-    "width": 1,
-    "height": 1,
-    "selected": true,
-    "clientWidth": 1920,
-    "clientHeight": 1440
-  },
-  "F6": {
-    "x": 1315,
-    "y": 1194,
-    "width": 1,
-    "height": 1,
-    "selected": true,
-    "clientWidth": 1920,
-    "clientHeight": 1440
-  },
-  "F9": {
-    "x": 1612,
-    "y": 1247,
-    "width": 1,
-    "height": 1,
-    "selected": true,
-    "clientWidth": 1920,
-    "clientHeight": 1440
-  },
   "HP": {
-    "x": 1268,
-    "y": 1248,
+    "x": 1789,
+    "y": 904,
     "width": 1,
     "height": 1,
     "selected": true,
@@ -164,7 +128,7 @@
   "PartyAutomatic": {
     "x": 0,
     "y": 747,
-    "width": 99,
+    "width": 101,
     "height": 24,
     "selected": true,
     "clientWidth": 1920,

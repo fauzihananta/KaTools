@@ -368,13 +368,14 @@ func (m *RuntimeManager) CloseTelemetry() {
 const (
 	stopReasonManual        = "manual"
 	stopReasonDCDetected    = "dc_detected"
+	stopReasonAutoLoginFail = "auto_login_failed"
 	stopReasonAccessRevoked = "access_revoked"
 	stopReasonAppExit       = "app_exit"
 )
 
 func normalizeStopReason(reason string) string {
 	switch strings.TrimSpace(reason) {
-	case stopReasonDCDetected, stopReasonAccessRevoked, stopReasonAppExit:
+	case stopReasonDCDetected, stopReasonAutoLoginFail, stopReasonAccessRevoked, stopReasonAppExit:
 		return strings.TrimSpace(reason)
 	default:
 		return stopReasonManual
@@ -471,6 +472,12 @@ func (m *RuntimeManager) Start(
 			"selected window no longer exists",
 		)
 	}
+
+	// Every runtime start must target the selected game window, regardless of
+	// which input method is enabled. This also makes keyboard input reliable
+	// when Start was initiated from the dashboard or Alt+F12.
+	focusWindow(windows.Handle(hwnd))
+	recordAutoLoginWindowTitle(hwnd)
 
 	fmt.Println()
 	fmt.Println("========================================")
@@ -1296,6 +1303,31 @@ func (m *RuntimeManager) HotkeyStart() {
 	// Use a fresh config copy so concurrent updates don't race
 	copyCfg := cfg
 	_ = m.Start(hwnd, copyCfg)
+}
+
+// RestartAfterAutoLogin starts the last bot configuration against the fresh
+// HWND found by Auto Login. It waits for DC cleanup so WGC generations never
+// overlap, which is the main difference from the ordinary hotkey restart.
+func (m *RuntimeManager) RestartAfterAutoLogin(hwnd uintptr) error {
+	if !isWindowValid(hwnd) {
+		return fmt.Errorf("recovered game window no longer exists")
+	}
+
+	deadline := time.Now().Add(20 * time.Second)
+	for {
+		m.mu.RLock()
+		busy := m.running || m.starting || m.stopping
+		cfg := m.lastConfig
+		m.mu.RUnlock()
+		if !busy {
+			cfg.HWND = fmt.Sprintf("0x%X", hwnd)
+			return m.Start(hwnd, cfg)
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("previous KaTools runtime did not finish stopping")
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
 }
 
 // ============================================================
@@ -2748,6 +2780,12 @@ func runPicker(
 					sent,
 					oCRTextForLog(event.text),
 				)
+				// Auto Login is opt-in and begins only after the existing DC
+				// acknowledgement has landed. Its detached sequence survives the
+				// normal DC runtime shutdown below.
+				if sent {
+					startAutoLoginRecovery(uintptr(hwnd))
+				}
 				if onRuntimeStop != nil {
 					go onRuntimeStop(stopReasonDCDetected)
 				}
