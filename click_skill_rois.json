@@ -45,8 +45,8 @@
     "clientHeight": 1440
   },
   "AutoLoginAutoHunt": {
-    "x": 871,
-    "y": 586,
+    "x": 870,
+    "y": 588,
     "width": 1,
     "height": 1,
     "selected": true,
@@ -54,8 +54,8 @@
     "clientHeight": 1440
   },
   "AutoLoginCharacter": {
-    "x": 961,
-    "y": 860,
+    "x": 955,
+    "y": 846,
     "width": 1,
     "height": 1,
     "selected": true,
@@ -63,8 +63,8 @@
     "clientHeight": 1440
   },
   "AutoLoginOK": {
-    "x": 243,
-    "y": 537,
+    "x": 246,
+    "y": 536,
     "width": 1,
     "height": 1,
     "selected": true,
@@ -99,8 +99,8 @@
     "clientHeight": 1440
   },
   "DCOk": {
-    "x": 1062,
-    "y": 762,
+    "x": 1061,
+    "y": 769,
     "width": 1,
     "height": 1,
     "selected": true,

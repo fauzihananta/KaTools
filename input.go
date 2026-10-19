@@ -25,7 +25,9 @@ const (
 	wmMouseMove                = 0x0200
 	wmLButtonDown              = 0x0201
 	wmLButtonUp                = 0x0202
+	wmMouseWheel               = 0x020A
 	mkLButton                  = 0x0001
+	mouseWheelBackwardDelta    = -120
 	smtoAbortIfHung            = 0x0002
 	cwpSkipInvisible           = 0x0001
 	cwpSkipDisabled            = 0x0002
@@ -124,6 +126,20 @@ func tryClearFakeCursor() {
 }
 
 func pressKeyToWindow(hwnd uintptr, vk uintptr) bool {
+	return pressKeyToWindowWithLParam(hwnd, vk, 0)
+}
+
+// pressInsertToWindow carries Insert's extended-key and scan-code bits. Some
+// game clients ignore a bare VK_INSERT WM_KEYDOWN even though ordinary letter
+// keys work, because Insert is an extended keyboard key.
+func pressInsertToWindow(hwnd uintptr) bool {
+	const insertVirtualKey = 0x2D
+	const insertScanCode = 0x52
+	lParam := uintptr(1 | insertScanCode<<16 | 1<<24)
+	return pressKeyToWindowWithLParam(hwnd, insertVirtualKey, lParam)
+}
+
+func pressKeyToWindowWithLParam(hwnd uintptr, vk, lParam uintptr) bool {
 	if hwnd == 0 || vk == 0 {
 		return false
 	}
@@ -138,7 +154,7 @@ func pressKeyToWindow(hwnd uintptr, vk uintptr) bool {
 		hwnd,
 		uintptr(wmKeyDown),
 		vk,
-		0,
+		lParam,
 		smtoAbortIfHung,
 		1000,
 		uintptr(unsafe.Pointer(&result)),
@@ -150,6 +166,41 @@ func pressKeyToWindow(hwnd uintptr, vk uintptr) bool {
 			fmt.Printf("[Input] WM_KEYDOWN to window 0x%X timed out\n", hwnd)
 		}
 		return false
+	}
+	return true
+}
+
+// scrollWindowBackward sends targeted, virtual mouse-wheel messages without
+// moving the user's physical pointer. A small gap gives games time to process
+// each individual wheel notch.
+func scrollWindowBackward(hwnd uintptr, count int) bool {
+	if hwnd == 0 || count <= 0 {
+		return false
+	}
+	delta := int16(mouseWheelBackwardDelta)
+	wParam := uintptr(uint16(delta)) << 16
+	for scroll := 0; scroll < count; scroll++ {
+		var result uintptr
+		ok, _, callErr := procSendMessageTimeoutW.Call(
+			hwnd,
+			uintptr(wmMouseWheel),
+			wParam,
+			0,
+			smtoAbortIfHung,
+			1000,
+			uintptr(unsafe.Pointer(&result)),
+		)
+		if ok == 0 {
+			if callErr != syscall.Errno(0) {
+				fmt.Printf("[Input] WM_MOUSEWHEEL to window 0x%X failed: %v\n", hwnd, callErr)
+			} else {
+				fmt.Printf("[Input] WM_MOUSEWHEEL to window 0x%X timed out\n", hwnd)
+			}
+			return false
+		}
+		if scroll+1 < count {
+			time.Sleep(75 * time.Millisecond)
+		}
 	}
 	return true
 }

@@ -1,11 +1,13 @@
 package main
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestListGameExecutablesReturnsOnlyRootExecutables(t *testing.T) {
@@ -91,6 +93,24 @@ func TestAutoLoginCanSkipAutoHuntPointer(t *testing.T) {
 	}
 }
 
+func TestAutoLoginLaunchRetryIsBounded(t *testing.T) {
+	if autoLoginLaunchAttempts != 3 {
+		t.Fatalf("Auto Login launch attempts = %d, want 3", autoLoginLaunchAttempts)
+	}
+	if autoLoginSlowStartGrace != 15*time.Second {
+		t.Fatalf("Auto Login slow-start grace = %s, want 15s", autoLoginSlowStartGrace)
+	}
+}
+
+func TestAutoLoginPostHuntSequenceTiming(t *testing.T) {
+	if autoLoginPostHuntKeyDelay != 7*time.Second || autoLoginPostHuntMenuDelay != 7*time.Second {
+		t.Fatalf("post-hunt timing = %s then %s, want 7s then 7s", autoLoginPostHuntKeyDelay, autoLoginPostHuntMenuDelay)
+	}
+	if autoLoginPostHuntScrolls != 20 {
+		t.Fatalf("post-hunt scroll count = %d, want 20", autoLoginPostHuntScrolls)
+	}
+}
+
 func TestLegacyGameLaunchConfigRunsAutoHunt(t *testing.T) {
 	if !(GameLaunchConfig{}).RunAutoHuntEnabled() {
 		t.Fatal("settings without the new field must preserve Auto Hunt behaviour")
@@ -113,5 +133,66 @@ func TestNormalizeAutoHuntKey(t *testing.T) {
 		if _, err := normalizeAutoHuntKey(value); err == nil {
 			t.Fatalf("normalizeAutoHuntKey(%q) should fail", value)
 		}
+	}
+}
+
+func TestWebBotConfigEmbedsAutoLoginProfileSettings(t *testing.T) {
+	enabled := true
+	characterPointer := ClickSkillROI{Selected: true, X: 243, Y: 537, Width: 1, Height: 1, ClientWidth: 1920, ClientHeight: 1440}
+	want := WebBotConfig{AutoLogin: GameLaunchConfig{
+		Enabled:     true,
+		RunAutoHunt: &enabled,
+		AutoHuntKey: "Q",
+		Folder:      `D:\Games\Kathana`,
+		EXE:         "KathanaGame.exe",
+		Pointers: map[string]ClickSkillROI{
+			"AutoLoginCharacter": characterPointer,
+		},
+	}}
+	data, err := json.Marshal(want)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got WebBotConfig
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.AutoLogin.Folder != want.AutoLogin.Folder || got.AutoLogin.EXE != want.AutoLogin.EXE || got.AutoLogin.AutoHuntKey != "Q" || !got.AutoLogin.Enabled || !got.AutoLogin.RunAutoHuntEnabled() {
+		t.Fatalf("Auto Login profile settings were not preserved: %+v", got.AutoLogin)
+	}
+	if gotPointer, ok := got.AutoLogin.Pointers["AutoLoginCharacter"]; !ok || !reflect.DeepEqual(gotPointer, characterPointer) {
+		t.Fatalf("Auto Login profile pointer was not preserved: %+v", got.AutoLogin.Pointers)
+	}
+}
+
+func TestAutoLoginPointersUseProfileConfig(t *testing.T) {
+	disabled := false
+	cfg := GameLaunchConfig{
+		RunAutoHunt: &disabled,
+		Pointers: map[string]ClickSkillROI{
+			"AutoLoginCharacter": {Selected: true, X: 100, Y: 200, Width: 1, Height: 1},
+			"AutoLoginOK":        {Selected: true, X: 300, Y: 400, Width: 1, Height: 1},
+		},
+	}
+	if err := autoLoginPointersForConfig(cfg); err != nil {
+		t.Fatalf("profile pointers should satisfy Auto Login with Auto Hunt disabled: %v", err)
+	}
+	if got := cloneAutoLoginPointers(map[string]ClickSkillROI{"1": {}, "AutoLoginOK": cfg.Pointers["AutoLoginOK"]}); len(got) != 1 || !got["AutoLoginOK"].Selected {
+		t.Fatalf("unexpected Auto Login pointer clone: %+v", got)
+	}
+}
+
+func TestGlobalAutoLoginPointersExcludeCharacterPointer(t *testing.T) {
+	pointers := map[string]ClickSkillROI{
+		"AutoLoginCharacter": {Selected: true, X: 100, Y: 200, Width: 1, Height: 1},
+		"AutoLoginOK":        {Selected: true, X: 300, Y: 400, Width: 1, Height: 1},
+		"AutoLoginAutoHunt":  {Selected: true, X: 500, Y: 600, Width: 1, Height: 1},
+	}
+	global := cloneGlobalAutoLoginPointers(pointers)
+	if _, found := global["AutoLoginCharacter"]; found {
+		t.Fatal("character pointer must not be saved in global Auto Login settings")
+	}
+	if len(global) != 2 || !global["AutoLoginOK"].Selected || !global["AutoLoginAutoHunt"].Selected {
+		t.Fatalf("global Auto Login pointers = %+v, want Login OK and Auto Hunt", global)
 	}
 }

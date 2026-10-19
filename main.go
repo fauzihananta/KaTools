@@ -463,6 +463,12 @@ func (m *RuntimeManager) Start(
 		m.mu.Unlock()
 	}()
 
+	// A profile supplies only its character-selection pointer. The remaining
+	// Auto Login options are shared game settings and remain untouched here.
+	if err := setGameLaunchConfig(cfg.AutoLogin); err != nil {
+		return err
+	}
+
 	if hwnd == 0 {
 		return fmt.Errorf("invalid window handle")
 	}
@@ -1412,6 +1418,10 @@ func getTargetFocusInfo(hwnd windows.Handle) (uintptr, string, string, error) {
 	return info.HwndFocus,
 		className,
 		getWindowTitle(windows.Handle(info.HwndFocus)), nil
+}
+
+func focusInfoTargetWindowLost(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "GetWindowThreadProcessId failed")
 }
 
 func getWindowTitle(
@@ -2764,6 +2774,11 @@ func runPicker(
 			}
 			texts := append([]string{event.text}, event.candidates...)
 			if dcNotification.Observe(texts) {
+				if path, err := recordDCIncident(time.Now()); err != nil {
+					appendOCRLog("DC INCIDENT LOG FAILED | %v", err)
+				} else {
+					appendOCRLog("DC INCIDENT LOG | File=%s", path)
+				}
 				sent := false
 				method := "Enter"
 				if bot.PopupClickMethodEnabled() {
@@ -3010,6 +3025,13 @@ func runPicker(
 			focusHWND, focusClass, focusText, err := getTargetFocusInfo(hwnd)
 			if err != nil {
 				appendOCRLog("FOCUS INFO ERROR | %v", err)
+				if focusInfoTargetWindowLost(err) {
+					appendOCRLog("TARGET WINDOW LOST | GetWindowThreadProcessId failed | Stopping KaTools runtime")
+					if onRuntimeStop != nil {
+						go onRuntimeStop(stopReasonManual)
+					}
+					return
+				}
 			} else if focusHWND == 0 {
 				// SDL temporarily reports no focused child for several normal game
 				// interactions. It is not actionable and used to flood the log.

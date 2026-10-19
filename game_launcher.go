@@ -14,19 +14,16 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-const gameLaunchConfigFileName = "katools_game_launch.json"
-
-// GameLaunchConfig is intentionally separate from a character profile. A game
-// installation belongs to the computer, while profiles belong to characters.
-// Keeping them separate also means old saved profiles remain byte-for-byte
-// compatible with this optional feature.
+// GameLaunchConfig supplies the Auto Login UI and runtime. Its global settings
+// are saved beside the app; character profiles retain only AutoLoginCharacter.
 type GameLaunchConfig struct {
-	Enabled     bool   `json:"enabled"`
-	RunAutoHunt *bool  `json:"runAutoHunt,omitempty"`
-	AutoHuntKey string `json:"autoHuntKey,omitempty"`
-	Folder      string `json:"folder"`
-	EXE         string `json:"exe"`
-	WindowTitle string `json:"windowTitle"`
+	Enabled     bool                     `json:"enabled,omitempty"`
+	RunAutoHunt *bool                    `json:"runAutoHunt,omitempty"`
+	AutoHuntKey string                   `json:"autoHuntKey,omitempty"`
+	Folder      string                   `json:"folder,omitempty"`
+	EXE         string                   `json:"exe,omitempty"`
+	WindowTitle string                   `json:"windowTitle,omitempty"`
+	Pointers    map[string]ClickSkillROI `json:"pointers,omitempty"`
 }
 
 // Older launcher settings predate the checkbox and therefore omit the field.
@@ -54,7 +51,11 @@ func (cfg GameLaunchConfig) AutoHuntKeyValue() string {
 	return key
 }
 
+const gameLaunchConfigFileName = "katools_game_launch.json"
+
 var gameLaunchConfigMu sync.Mutex
+var gameLaunchSessionConfig GameLaunchConfig
+var gameLaunchConfigLoaded bool
 
 const (
 	// The old game process can still be shutting down immediately after the
@@ -62,11 +63,16 @@ const (
 	// instance lock before launching the selected executable again.
 	autoLoginLaunchDelay       = 30 * time.Second
 	autoLoginFirstEnterDelay   = 35 * time.Second
+	autoLoginSlowStartGrace    = 15 * time.Second
+	autoLoginLaunchAttempts    = 3
 	autoLoginSecondEnterDelay  = 6 * time.Second
 	autoLoginCharacterDelay    = 10 * time.Second
 	autoLoginLoginOKRetryDelay = 3 * time.Second
 	autoLoginGameReadyDelay    = 10 * time.Second
 	autoLoginHuntMenuDelay     = time.Second
+	autoLoginPostHuntKeyDelay  = 7 * time.Second
+	autoLoginPostHuntMenuDelay = 7 * time.Second
+	autoLoginPostHuntScrolls   = 20
 	autoLoginWindowPoll        = time.Second
 	autoLoginWindowAttempts    = 30
 )
@@ -80,42 +86,171 @@ func gameLaunchConfigPath() string {
 	return filepath.Join(filepath.Dir(savedConfigPath()), gameLaunchConfigFileName)
 }
 
+// The selected character is the only profile-specific Auto Login setting.
+// Launch options and the Login OK / Auto Hunt pointers belong to the game
+// installation and remain shared globally across character configs.
 func loadGameLaunchConfig() (GameLaunchConfig, error) {
 	gameLaunchConfigMu.Lock()
 	defer gameLaunchConfigMu.Unlock()
+	if err := loadGameLaunchConfigLocked(); err != nil {
+		return GameLaunchConfig{}, err
+	}
+	cfg := gameLaunchSessionConfig
+	cfg.Pointers = cloneAutoLoginPointers(cfg.Pointers)
+	return cfg, nil
+}
 
+func loadGameLaunchConfigLocked() error {
+	if gameLaunchConfigLoaded {
+		return nil
+	}
 	data, err := os.ReadFile(gameLaunchConfigPath())
 	if os.IsNotExist(err) {
-		return GameLaunchConfig{}, nil
+		gameLaunchConfigLoaded = true
+		return nil
 	}
 	if err != nil {
-		return GameLaunchConfig{}, fmt.Errorf("read game launcher settings: %w", err)
+		return fmt.Errorf("read global Auto Login settings: %w", err)
 	}
-
 	var cfg GameLaunchConfig
 	if err := json.Unmarshal(data, &cfg); err != nil {
-		return GameLaunchConfig{}, fmt.Errorf("read game launcher settings: %w", err)
+		return fmt.Errorf("read global Auto Login settings: %w", err)
+	}
+	// Older versions stored the character pointer globally. Do not carry it
+	// forward: loading a character profile now owns that one setting.
+	cfg.Pointers = cloneGlobalAutoLoginPointers(cfg.Pointers)
+	gameLaunchSessionConfig = cfg
+	gameLaunchConfigLoaded = true
+	return nil
+}
+
+func saveGameLaunchConfig(cfg GameLaunchConfig) error {
+	globalCfg := cfg
+	globalCfg.Pointers = cloneGlobalAutoLoginPointers(cfg.Pointers)
+	data, err := json.MarshalIndent(globalCfg, "", "  ")
+	if err != nil {
+		return fmt.Errorf("encode global Auto Login settings: %w", err)
+	}
+	path := gameLaunchConfigPath()
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		return fmt.Errorf("create global Auto Login settings folder: %w", err)
+	}
+	if err := os.WriteFile(path+".tmp", data, 0644); err != nil {
+		return fmt.Errorf("write global Auto Login settings: %w", err)
+	}
+	if err := os.Rename(path+".tmp", path); err != nil {
+		return fmt.Errorf("finalize global Auto Login settings: %w", err)
+	}
+	gameLaunchSessionConfig = cfg
+	gameLaunchConfigLoaded = true
+	return nil
+}
+
+// setGameLaunchConfig applies the character part from a saved profile. Its
+// global-looking fields are intentionally ignored so loading another character
+// cannot replace the selected executable or Auto Hunt settings.
+func setGameLaunchConfig(cfg GameLaunchConfig) error {
+	gameLaunchConfigMu.Lock()
+	defer gameLaunchConfigMu.Unlock()
+	if err := loadGameLaunchConfigLocked(); err != nil {
+		return err
+	}
+	profilePointer, set := cfg.Pointers["AutoLoginCharacter"]
+	gameLaunchSessionConfig.Pointers = cloneAutoLoginPointers(gameLaunchSessionConfig.Pointers)
+	if set && profilePointer.Selected {
+		if gameLaunchSessionConfig.Pointers == nil {
+			gameLaunchSessionConfig.Pointers = make(map[string]ClickSkillROI)
+		}
+		gameLaunchSessionConfig.Pointers["AutoLoginCharacter"] = profilePointer
+	} else {
+		delete(gameLaunchSessionConfig.Pointers, "AutoLoginCharacter")
+	}
+	return nil
+}
+
+func isAutoLoginPointerSlot(slot string) bool {
+	switch slot {
+	case "AutoLoginCharacter", "AutoLoginOK", "AutoLoginAutoHunt":
+		return true
+	default:
+		return false
+	}
+}
+
+func cloneAutoLoginPointers(pointers map[string]ClickSkillROI) map[string]ClickSkillROI {
+	if len(pointers) == 0 {
+		return nil
+	}
+	cloned := make(map[string]ClickSkillROI, len(pointers))
+	for slot, pointer := range pointers {
+		if isAutoLoginPointerSlot(slot) {
+			cloned[slot] = pointer
+		}
+	}
+	return cloned
+}
+
+func cloneGlobalAutoLoginPointers(pointers map[string]ClickSkillROI) map[string]ClickSkillROI {
+	if len(pointers) == 0 {
+		return nil
+	}
+	cloned := make(map[string]ClickSkillROI, len(pointers))
+	for slot, pointer := range pointers {
+		if slot != "AutoLoginCharacter" && isAutoLoginPointerSlot(slot) {
+			cloned[slot] = pointer
+		}
+	}
+	return cloned
+}
+
+// setGameLaunchPointer changes only the active profile's Auto Login pointer.
+// Other click pointers deliberately keep their long-standing global storage.
+func setGameLaunchPointer(slot string, pointer ClickSkillROI) (GameLaunchConfig, error) {
+	if !isAutoLoginPointerSlot(slot) {
+		return GameLaunchConfig{}, fmt.Errorf("invalid Auto Login pointer %q", slot)
+	}
+	if !pointer.Selected {
+		return GameLaunchConfig{}, fmt.Errorf("Auto Login pointer must be selected")
+	}
+	gameLaunchConfigMu.Lock()
+	defer gameLaunchConfigMu.Unlock()
+	if err := loadGameLaunchConfigLocked(); err != nil {
+		return GameLaunchConfig{}, err
+	}
+
+	cfg := gameLaunchSessionConfig
+	cfg.Pointers = cloneAutoLoginPointers(cfg.Pointers)
+	if cfg.Pointers == nil {
+		cfg.Pointers = make(map[string]ClickSkillROI)
+	}
+	cfg.Pointers[slot] = pointer
+	if slot == "AutoLoginCharacter" {
+		gameLaunchSessionConfig = cfg
+	} else if err := saveGameLaunchConfig(cfg); err != nil {
+		return GameLaunchConfig{}, err
 	}
 	return cfg, nil
 }
 
-func saveGameLaunchConfig(cfg GameLaunchConfig) error {
-	data, err := json.MarshalIndent(cfg, "", "  ")
-	if err != nil {
-		return fmt.Errorf("encode game launcher settings: %w", err)
+func resetGameLaunchPointer(slot string) (GameLaunchConfig, error) {
+	if !isAutoLoginPointerSlot(slot) {
+		return GameLaunchConfig{}, fmt.Errorf("invalid Auto Login pointer %q", slot)
+	}
+	gameLaunchConfigMu.Lock()
+	defer gameLaunchConfigMu.Unlock()
+	if err := loadGameLaunchConfigLocked(); err != nil {
+		return GameLaunchConfig{}, err
 	}
 
-	path := gameLaunchConfigPath()
-	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
-		return fmt.Errorf("create game launcher settings folder: %w", err)
+	cfg := gameLaunchSessionConfig
+	cfg.Pointers = cloneAutoLoginPointers(cfg.Pointers)
+	delete(cfg.Pointers, slot)
+	if slot == "AutoLoginCharacter" {
+		gameLaunchSessionConfig = cfg
+	} else if err := saveGameLaunchConfig(cfg); err != nil {
+		return GameLaunchConfig{}, err
 	}
-	if err := os.WriteFile(path+".tmp", data, 0644); err != nil {
-		return fmt.Errorf("write game launcher settings: %w", err)
-	}
-	if err := os.Rename(path+".tmp", path); err != nil {
-		return fmt.Errorf("finalize game launcher settings: %w", err)
-	}
-	return nil
+	return cfg, nil
 }
 
 // listGameExecutables deliberately looks only in the selected folder. This
@@ -179,6 +314,9 @@ func configuredGameExecutable(cfg GameLaunchConfig) (string, error) {
 func selectGameLaunchFolder(folder string) (GameLaunchConfig, []string, error) {
 	gameLaunchConfigMu.Lock()
 	defer gameLaunchConfigMu.Unlock()
+	if err := loadGameLaunchConfigLocked(); err != nil {
+		return GameLaunchConfig{}, nil, err
+	}
 
 	if _, err := listGameExecutables(folder); err != nil {
 		return GameLaunchConfig{}, nil, err
@@ -192,22 +330,20 @@ func selectGameLaunchFolder(folder string) (GameLaunchConfig, []string, error) {
 		return GameLaunchConfig{}, nil, err
 	}
 
-	cfg := GameLaunchConfig{Folder: absoluteFolder}
-	previousData, err := os.ReadFile(gameLaunchConfigPath())
-	if err == nil {
-		var previous GameLaunchConfig
-		if json.Unmarshal(previousData, &previous) == nil {
-			cfg.Enabled = previous.Enabled
-			cfg.RunAutoHunt = previous.RunAutoHunt
-			cfg.AutoHuntKey = previous.AutoHuntKey
-			cfg.WindowTitle = previous.WindowTitle
-			if previous.Folder == absoluteFolder {
-				for _, name := range executables {
-					if name == previous.EXE {
-						cfg.EXE = name
-						break
-					}
-				}
+	previous := gameLaunchSessionConfig
+	cfg := GameLaunchConfig{
+		Enabled:     previous.Enabled,
+		RunAutoHunt: previous.RunAutoHunt,
+		AutoHuntKey: previous.AutoHuntKey,
+		Folder:      absoluteFolder,
+		WindowTitle: previous.WindowTitle,
+		Pointers:    cloneAutoLoginPointers(previous.Pointers),
+	}
+	if previous.Folder == absoluteFolder {
+		for _, name := range executables {
+			if name == previous.EXE {
+				cfg.EXE = name
+				break
 			}
 		}
 	}
@@ -223,19 +359,15 @@ func selectGameLaunchFolder(folder string) (GameLaunchConfig, []string, error) {
 func selectGameLaunchExecutable(exe string) (GameLaunchConfig, error) {
 	gameLaunchConfigMu.Lock()
 	defer gameLaunchConfigMu.Unlock()
+	if err := loadGameLaunchConfigLocked(); err != nil {
+		return GameLaunchConfig{}, err
+	}
 
-	data, err := os.ReadFile(gameLaunchConfigPath())
-	if err != nil {
-		if os.IsNotExist(err) {
-			return GameLaunchConfig{}, fmt.Errorf("select a game folder first")
-		}
-		return GameLaunchConfig{}, fmt.Errorf("read game launcher settings: %w", err)
+	cfg := gameLaunchSessionConfig
+	if cfg.Folder == "" {
+		return GameLaunchConfig{}, fmt.Errorf("select a game folder first")
 	}
-	var cfg GameLaunchConfig
-	if err := json.Unmarshal(data, &cfg); err != nil {
-		return GameLaunchConfig{}, fmt.Errorf("read game launcher settings: %w", err)
-	}
-	candidate := GameLaunchConfig{Enabled: cfg.Enabled, RunAutoHunt: cfg.RunAutoHunt, AutoHuntKey: cfg.AutoHuntKey, Folder: cfg.Folder, EXE: strings.TrimSpace(exe), WindowTitle: cfg.WindowTitle}
+	candidate := GameLaunchConfig{Enabled: cfg.Enabled, RunAutoHunt: cfg.RunAutoHunt, AutoHuntKey: cfg.AutoHuntKey, Folder: cfg.Folder, EXE: strings.TrimSpace(exe), WindowTitle: cfg.WindowTitle, Pointers: cloneAutoLoginPointers(cfg.Pointers)}
 	if _, err := configuredGameExecutable(candidate); err != nil {
 		return GameLaunchConfig{}, err
 	}
@@ -255,16 +387,11 @@ func setGameLaunchEnabled(enabled bool) (GameLaunchConfig, error) {
 
 	gameLaunchConfigMu.Lock()
 	defer gameLaunchConfigMu.Unlock()
-
-	cfg := GameLaunchConfig{}
-	data, err := os.ReadFile(gameLaunchConfigPath())
-	if err == nil {
-		if err := json.Unmarshal(data, &cfg); err != nil {
-			return GameLaunchConfig{}, fmt.Errorf("read game launcher settings: %w", err)
-		}
-	} else if !os.IsNotExist(err) {
-		return GameLaunchConfig{}, fmt.Errorf("read game launcher settings: %w", err)
+	if err := loadGameLaunchConfigLocked(); err != nil {
+		return GameLaunchConfig{}, err
 	}
+
+	cfg := gameLaunchSessionConfig
 	cfg.Enabled = enabled
 	if err := saveGameLaunchConfig(cfg); err != nil {
 		return GameLaunchConfig{}, err
@@ -279,16 +406,11 @@ func autoLoginOnlineAccessAllowed() bool {
 func setGameLaunchAutoHunt(enabled bool) (GameLaunchConfig, error) {
 	gameLaunchConfigMu.Lock()
 	defer gameLaunchConfigMu.Unlock()
-
-	cfg := GameLaunchConfig{}
-	data, err := os.ReadFile(gameLaunchConfigPath())
-	if err == nil {
-		if err := json.Unmarshal(data, &cfg); err != nil {
-			return GameLaunchConfig{}, fmt.Errorf("read game launcher settings: %w", err)
-		}
-	} else if !os.IsNotExist(err) {
-		return GameLaunchConfig{}, fmt.Errorf("read game launcher settings: %w", err)
+	if err := loadGameLaunchConfigLocked(); err != nil {
+		return GameLaunchConfig{}, err
 	}
+
+	cfg := gameLaunchSessionConfig
 	cfg.RunAutoHunt = &enabled
 	if err := saveGameLaunchConfig(cfg); err != nil {
 		return GameLaunchConfig{}, err
@@ -304,16 +426,11 @@ func setGameLaunchAutoHuntKey(key string) (GameLaunchConfig, error) {
 
 	gameLaunchConfigMu.Lock()
 	defer gameLaunchConfigMu.Unlock()
-
-	cfg := GameLaunchConfig{}
-	data, err := os.ReadFile(gameLaunchConfigPath())
-	if err == nil {
-		if err := json.Unmarshal(data, &cfg); err != nil {
-			return GameLaunchConfig{}, fmt.Errorf("read game launcher settings: %w", err)
-		}
-	} else if !os.IsNotExist(err) {
-		return GameLaunchConfig{}, fmt.Errorf("read game launcher settings: %w", err)
+	if err := loadGameLaunchConfigLocked(); err != nil {
+		return GameLaunchConfig{}, err
 	}
+
+	cfg := gameLaunchSessionConfig
 	cfg.AutoHuntKey = key
 	if err := saveGameLaunchConfig(cfg); err != nil {
 		return GameLaunchConfig{}, err
@@ -342,18 +459,11 @@ func recordAutoLoginWindowTitle(hwnd uintptr) {
 
 	gameLaunchConfigMu.Lock()
 	defer gameLaunchConfigMu.Unlock()
-	data, err := os.ReadFile(gameLaunchConfigPath())
-	if err != nil {
-		if !os.IsNotExist(err) {
-			appendOCRLog("AUTO LOGIN TITLE NOT SAVED | Read settings failed | %v", err)
-		}
+	if err := loadGameLaunchConfigLocked(); err != nil {
+		appendOCRLog("AUTO LOGIN TITLE NOT SAVED | Read global settings failed | %v", err)
 		return
 	}
-	var cfg GameLaunchConfig
-	if err := json.Unmarshal(data, &cfg); err != nil {
-		appendOCRLog("AUTO LOGIN TITLE NOT SAVED | Read settings failed | %v", err)
-		return
-	}
+	cfg := gameLaunchSessionConfig
 	if !cfg.Enabled || cfg.WindowTitle == title {
 		return
 	}
@@ -368,18 +478,11 @@ func recordAutoLoginWindowTitle(hwnd uintptr) {
 func launchConfiguredGame() (GameLaunchConfig, error) {
 	gameLaunchConfigMu.Lock()
 	defer gameLaunchConfigMu.Unlock()
+	if err := loadGameLaunchConfigLocked(); err != nil {
+		return GameLaunchConfig{}, err
+	}
 
-	data, err := os.ReadFile(gameLaunchConfigPath())
-	if err != nil {
-		if os.IsNotExist(err) {
-			return GameLaunchConfig{}, fmt.Errorf("select a game folder and executable first")
-		}
-		return GameLaunchConfig{}, fmt.Errorf("read game launcher settings: %w", err)
-	}
-	var cfg GameLaunchConfig
-	if err := json.Unmarshal(data, &cfg); err != nil {
-		return GameLaunchConfig{}, fmt.Errorf("read game launcher settings: %w", err)
-	}
+	cfg := gameLaunchSessionConfig
 	path, err := configuredGameExecutable(cfg)
 	if err != nil {
 		return GameLaunchConfig{}, err
@@ -422,7 +525,7 @@ func startAutoLoginRecovery(targetHWND uintptr) {
 		appendOCRLog("AUTO LOGIN SKIPPED | Game executable invalid | %v", err)
 		return
 	}
-	if err := autoLoginPointersForHunt(cfg.RunAutoHuntEnabled()); err != nil {
+	if err := autoLoginPointersForConfig(cfg); err != nil {
 		appendOCRLog("AUTO LOGIN SKIPPED | %v", err)
 		return
 	}
@@ -459,6 +562,30 @@ func autoLoginPointers() error {
 
 func autoLoginPointersForHunt(runAutoHunt bool) error {
 	return autoLoginPointersFromAreasForHunt(LoadClickSkillROIs(), runAutoHunt)
+}
+
+func autoLoginPointersForConfig(cfg GameLaunchConfig) error {
+	return autoLoginPointersFromAreasForHunt(cfg.Pointers, cfg.RunAutoHuntEnabled())
+}
+
+func clickAutoLoginConfiguredAction(hwnd uintptr, cfg GameLaunchConfig, slot string) (bool, error) {
+	if !isAutoLoginPointerSlot(slot) {
+		return false, fmt.Errorf("invalid Auto Login pointer %q", slot)
+	}
+	area, ok := cfg.Pointers[slot]
+	if !ok || !area.Selected {
+		return false, fmt.Errorf("Auto Login pointer %q is not set", slot)
+	}
+	if err := clickWindowClientPointReference(
+		hwnd,
+		area.X+area.Width/2,
+		area.Y+area.Height/2,
+		area.ClientWidth,
+		area.ClientHeight,
+	); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 func autoLoginPointersFromAreas(areas map[string]ClickSkillROI) error {
@@ -532,6 +659,51 @@ func autoLoginWindow(original uintptr, title string) uintptr {
 	return 0
 }
 
+// After launching the executable, the original HWND is the disconnected game
+// instance. Never send the new login sequence to it: wait for a distinct
+// window with the saved title instead. If the launcher/game closes during its
+// own connection attempt, this returns zero and recovery stops harmlessly.
+func autoLoginNewWindowAfterLaunch(original uintptr, title string) uintptr {
+	title = strings.TrimSpace(title)
+	if title == "" {
+		return 0
+	}
+	for _, candidate := range enumerateWindows() {
+		if candidate.Title != title {
+			continue
+		}
+		hwnd, err := parseHWND(candidate.HWND)
+		if err == nil && hwnd != original && isWindowValid(hwnd) {
+			return hwnd
+		}
+	}
+	return 0
+}
+
+// waitForAutoLoginNewWindow gives a slow machine a short, actively polled
+// grace period before another launch is attempted. The result is also false
+// when Auto Login is disabled while waiting, so retries never outlive the
+// user's setting.
+func waitForAutoLoginNewWindow(original uintptr, title string, timeout time.Duration) (uintptr, bool) {
+	deadline := time.NewTimer(timeout)
+	defer deadline.Stop()
+	poll := time.NewTicker(time.Second)
+	defer poll.Stop()
+	for {
+		if hwnd := autoLoginNewWindowAfterLaunch(original, title); hwnd != 0 {
+			return hwnd, true
+		}
+		select {
+		case <-deadline.C:
+			return 0, autoLoginStillEnabled()
+		case <-poll.C:
+			if !autoLoginStillEnabled() {
+				return 0, false
+			}
+		}
+	}
+}
+
 func autoLoginWindowByTitle(title string) uintptr {
 	title = strings.TrimSpace(title)
 	if title == "" {
@@ -560,12 +732,18 @@ func restartKaToolsAfterAutoLogin(title string) {
 			appendOCRLog("AUTO LOGIN REATTACH WINDOW FOUND | Attempt=%d/%d | HWND=0x%X | Title=%q", attempt, autoLoginWindowAttempts, hwnd, title)
 			manager := getGlobalRuntimeManager()
 			if manager == nil {
-				stopKaToolsForAutoLoginFailure("runtime manager is unavailable")
+				appendOCRLog("AUTO LOGIN REATTACH FAILED | Runtime manager is unavailable | KaTools remains open")
 				return
 			}
 			if err := manager.RestartAfterAutoLogin(hwnd); err != nil {
-				stopKaToolsForAutoLoginFailure("restart failed: " + err.Error())
-				return
+				// A newly visible game window can precede the game's WGC/shared-memory
+				// initialization. Treat that as a retryable reattach failure, not an
+				// application-fatal error.
+				appendOCRLog("AUTO LOGIN REATTACH WAIT | Attempt=%d/%d | Restart not ready: %v", attempt, autoLoginWindowAttempts, err)
+				if attempt < autoLoginWindowAttempts {
+					time.Sleep(autoLoginWindowPoll)
+				}
+				continue
 			}
 			appendOCRLog("AUTO LOGIN REATTACH COMPLETE | HWND=0x%X | Title=%q", hwnd, title)
 			return
@@ -575,20 +753,7 @@ func restartKaToolsAfterAutoLogin(title string) {
 			time.Sleep(autoLoginWindowPoll)
 		}
 	}
-	stopKaToolsForAutoLoginFailure(fmt.Sprintf("game window %q was not found after %d attempts", title, autoLoginWindowAttempts))
-}
-
-// stopKaToolsForAutoLoginFailure intentionally closes the whole application:
-// after a bounded title search fails there is no safe target window left for
-// KaTools to control, and continuing would leave a misleading idle dashboard.
-func stopKaToolsForAutoLoginFailure(reason string) {
-	appendOCRLog("AUTO LOGIN FATAL | %s | Stopping KaTools application", reason)
-	if manager := getGlobalRuntimeManager(); manager != nil {
-		manager.StopWithReason(stopReasonAutoLoginFail)
-		manager.CloseTelemetry()
-	}
-	time.Sleep(200 * time.Millisecond)
-	os.Exit(1)
+	appendOCRLog("AUTO LOGIN REATTACH FAILED | Game window %q was not ready after %d attempts | KaTools remains open", title, autoLoginWindowAttempts)
 }
 
 func runAutoLoginRecovery(originalHWND uintptr, targetTitle string) {
@@ -598,19 +763,49 @@ func runAutoLoginRecovery(originalHWND uintptr, targetTitle string) {
 		return
 	}
 
-	cfg, err := launchConfiguredGame()
-	if err != nil {
-		appendOCRLog("AUTO LOGIN FAILED | Start game executable | %v", err)
-		return
-	}
-	appendOCRLog("AUTO LOGIN STARTED | EXE=%s | Waiting=%s before first Enter", cfg.EXE, autoLoginFirstEnterDelay)
+	var cfg GameLaunchConfig
+	var targetHWND uintptr
+	for attempt := 1; attempt <= autoLoginLaunchAttempts; attempt++ {
+		appendOCRLog("AUTO LOGIN LAUNCH ATTEMPT | Attempt=%d/%d", attempt, autoLoginLaunchAttempts)
+		launched, err := launchConfiguredGame()
+		if err != nil {
+			appendOCRLog("AUTO LOGIN LAUNCH FAILED | Attempt=%d/%d | %v", attempt, autoLoginLaunchAttempts, err)
+			// The executable may have handed control to a background launcher
+			// before returning its single-instance error. Keep checking for its
+			// window during the same bounded grace period.
+			cfg, _ = loadGameLaunchConfig()
+		} else {
+			cfg = launched
+			appendOCRLog("AUTO LOGIN STARTED | Attempt=%d/%d | EXE=%s | Waiting=%s before first Enter", attempt, autoLoginLaunchAttempts, cfg.EXE, autoLoginFirstEnterDelay)
+			if !waitForAutoLoginStage(autoLoginFirstEnterDelay) {
+				appendOCRLog("AUTO LOGIN CANCELED | Disabled while waiting for first Enter")
+				return
+			}
+			if targetHWND = autoLoginNewWindowAfterLaunch(originalHWND, targetTitle); targetHWND != 0 {
+				break
+			}
+		}
 
-	if !waitForAutoLoginStage(autoLoginFirstEnterDelay) {
-		appendOCRLog("AUTO LOGIN CANCELED | Disabled while waiting for first Enter")
+		appendOCRLog("AUTO LOGIN SLOW START CHECK | Attempt=%d/%d | Window not found | Waiting up to %s before retry", attempt, autoLoginLaunchAttempts, autoLoginSlowStartGrace)
+		var stillEnabled bool
+		targetHWND, stillEnabled = waitForAutoLoginNewWindow(originalHWND, targetTitle, autoLoginSlowStartGrace)
+		if targetHWND != 0 {
+			appendOCRLog("AUTO LOGIN SLOW START RECOVERED | Attempt=%d/%d | HWND=0x%X", attempt, autoLoginLaunchAttempts, targetHWND)
+			break
+		}
+		if !stillEnabled {
+			appendOCRLog("AUTO LOGIN CANCELED | Disabled while waiting for a delayed game window")
+			return
+		}
+		if attempt < autoLoginLaunchAttempts {
+			appendOCRLog("AUTO LOGIN RETRYING | Attempt=%d/%d | No new game window found", attempt+1, autoLoginLaunchAttempts)
+		}
+	}
+	if targetHWND == 0 {
+		appendOCRLog("AUTO LOGIN FAILED | New game window was not found after %d launch attempts | KaTools remains open", autoLoginLaunchAttempts)
 		return
 	}
-	targetHWND := autoLoginWindow(originalHWND, targetTitle)
-	if targetHWND == 0 || !pressEnterToWindow(targetHWND) {
+	if !pressEnterToWindow(targetHWND) {
 		appendOCRLog("AUTO LOGIN FAILED | First Enter could not be sent")
 		return
 	}
@@ -631,7 +826,7 @@ func runAutoLoginRecovery(originalHWND uintptr, targetTitle string) {
 		appendOCRLog("AUTO LOGIN CANCELED | Disabled before character selection")
 		return
 	}
-	if sent, err := clickConfiguredAction(targetHWND, "AutoLoginCharacter"); err != nil || !sent {
+	if sent, err := clickAutoLoginConfiguredAction(targetHWND, cfg, "AutoLoginCharacter"); err != nil || !sent {
 		appendOCRLog("AUTO LOGIN FAILED | Select Character click | %v", err)
 		return
 	}
@@ -644,7 +839,7 @@ func runAutoLoginRecovery(originalHWND uintptr, targetTitle string) {
 		appendOCRLog("AUTO LOGIN CANCELED | Disabled before Login OK")
 		return
 	}
-	if sent, err := clickConfiguredAction(targetHWND, "AutoLoginOK"); err != nil || !sent {
+	if sent, err := clickAutoLoginConfiguredAction(targetHWND, cfg, "AutoLoginOK"); err != nil || !sent {
 		appendOCRLog("AUTO LOGIN FAILED | First Login OK click | %v", err)
 		return
 	}
@@ -658,7 +853,7 @@ func runAutoLoginRecovery(originalHWND uintptr, targetTitle string) {
 		appendOCRLog("AUTO LOGIN FAILED | Game window was unavailable for second Login OK click")
 		return
 	}
-	if sent, err := clickConfiguredAction(targetHWND, "AutoLoginOK"); err != nil || !sent {
+	if sent, err := clickAutoLoginConfiguredAction(targetHWND, cfg, "AutoLoginOK"); err != nil || !sent {
 		appendOCRLog("AUTO LOGIN FAILED | Second Login OK click | %v", err)
 		return
 	}
@@ -678,7 +873,7 @@ func runAutoLoginRecovery(originalHWND uintptr, targetTitle string) {
 		restartKaToolsAfterAutoLogin(targetTitle)
 		return
 	}
-	if err := autoLoginPointersForHunt(true); err != nil {
+	if err := autoLoginPointersForConfig(latestCfg); err != nil {
 		appendOCRLog("AUTO LOGIN FAILED | %v", err)
 		return
 	}
@@ -693,11 +888,36 @@ func runAutoLoginRecovery(originalHWND uintptr, targetTitle string) {
 		appendOCRLog("AUTO LOGIN CANCELED | Disabled while waiting for Auto Hunt panel")
 		return
 	}
-	if sent, err := clickConfiguredAction(targetHWND, "AutoLoginAutoHunt"); err != nil || !sent {
+	if sent, err := clickAutoLoginConfiguredAction(targetHWND, latestCfg, "AutoLoginAutoHunt"); err != nil || !sent {
 		appendOCRLog("AUTO LOGIN FAILED | Activate Auto Hunt click | %v", err)
 		return
 	}
 	appendOCRLog("AUTO LOGIN | Activate Auto Hunt click sent")
-	appendOCRLog("AUTO LOGIN COMPLETE | Character, Login OK, and Activate Auto Hunt clicks sent")
+	appendOCRLog("AUTO LOGIN | Waiting=%s before the second virtual %s", autoLoginPostHuntKeyDelay, autoHuntKey)
+	if !waitForAutoLoginStage(autoLoginPostHuntKeyDelay) {
+		appendOCRLog("AUTO LOGIN CANCELED | Disabled while waiting to send the second Auto Hunt key")
+		return
+	}
+	targetHWND = autoLoginWindow(targetHWND, targetTitle)
+	if targetHWND == 0 || !pressKeyToWindow(targetHWND, uintptr(autoHuntKey[0])) {
+		appendOCRLog("AUTO LOGIN FAILED | Second virtual %s for Auto Hunt could not be sent", autoHuntKey)
+		return
+	}
+	appendOCRLog("AUTO LOGIN | Second virtual %s sent | Waiting=%s before Insert and backward scroll", autoHuntKey, autoLoginPostHuntMenuDelay)
+	if !waitForAutoLoginStage(autoLoginPostHuntMenuDelay) {
+		appendOCRLog("AUTO LOGIN CANCELED | Disabled while waiting to send Insert")
+		return
+	}
+	targetHWND = autoLoginWindow(targetHWND, targetTitle)
+	if targetHWND == 0 || !pressInsertToWindow(targetHWND) {
+		appendOCRLog("AUTO LOGIN FAILED | Virtual Insert could not be sent")
+		return
+	}
+	if !scrollWindowBackward(targetHWND, autoLoginPostHuntScrolls) {
+		appendOCRLog("AUTO LOGIN FAILED | Virtual backward scroll could not be sent")
+		return
+	}
+	appendOCRLog("AUTO LOGIN | Virtual Insert sent | Virtual backward scroll=%d sent", autoLoginPostHuntScrolls)
+	appendOCRLog("AUTO LOGIN COMPLETE | Character, Login OK, and Auto Hunt sequence sent")
 	restartKaToolsAfterAutoLogin(targetTitle)
 }

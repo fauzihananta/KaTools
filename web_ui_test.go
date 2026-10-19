@@ -38,9 +38,7 @@ func TestChatKeywordPartyInviteIsAvailableInAllInputModes(t *testing.T) {
 		"clickAreaControlsAutoReject",
 		"chatTextInviteControls",
 		"chat-text-invite-controls",
-		"keyboardPopupScanAreas",
 		"isSharedChatInviteControl",
-		"isKeyboardPopupScanControl",
 		"popupAndPartyClickControls",
 		"isPopupScanControl",
 		"isAutoLoginControl",
@@ -113,6 +111,11 @@ func TestWebUIIncludesGameLauncherControls(t *testing.T) {
 		`id="autoLoginAutoHuntKey"`,
 		`/api/game-launch/auto-hunt-key`,
 		`setAutoLoginAutoHuntKey()`,
+		`/api/game-launch/config`,
+		`/api/game-launch/pointer`,
+		`saveAutoLoginPointer`,
+		`autoLoginProfileConfig`,
+		`applyAutoLoginProfile`,
 	} {
 		if !strings.Contains(webUIHTML, token) {
 			t.Fatalf("web UI is missing game launcher token %q", token)
