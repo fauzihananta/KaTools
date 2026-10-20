@@ -8,6 +8,16 @@ import (
 const emergencySkillSlotCount = 5
 const emergencySkillRepeatCooldown = 750 * time.Millisecond
 
+// A colour scan is much more reliable than the tiny HUD digits, but a single
+// WGC frame can still contain an animation or a clipped crop that resembles a
+// short red bar.  Emergency skills are high-impact actions, so require two
+// consecutive low readings before opening an emergency episode.  Likewise,
+// require a small, stable recovery before re-arming it; otherwise one noisy
+// full-bar frame could turn a sustained low-HP state into repeated casts.
+const emergencyLowHPConfirmations = 2
+const emergencyRecoveryConfirmations = 2
+const emergencyRecoveryMarginPercent = 3.0
+
 type EmergencySkillController struct {
 	mu sync.RWMutex
 
@@ -21,6 +31,19 @@ type EmergencySkillController struct {
 	targetActionReady bool
 	panicTargetSent   bool
 	lastAttempt       [emergencySkillSlotCount]time.Time
+	lowHPReadings     int
+	recoveredReadings int
+	lowHPEpisode      bool
+}
+
+// EmergencySkillEvent records one skill-delivery attempt that passed the
+// colour-bar confirmation gate. It is returned to the runtime so it can be
+// written to katools_ocr.log without coupling this controller to file I/O.
+type EmergencySkillEvent struct {
+	Slot        int
+	VK          uintptr
+	NeedsTarget bool
+	Sent        bool
 }
 
 func NewEmergencySkillController(hwnd uintptr, cfg WebBotConfig) *EmergencySkillController {
@@ -50,6 +73,9 @@ func (c *EmergencySkillController) Update(cfg WebBotConfig) {
 	// setup while HP is still low.
 	c.panicTargetSent = false
 	c.lastAttempt = [emergencySkillSlotCount]time.Time{}
+	c.lowHPReadings = 0
+	c.recoveredReadings = 0
+	c.lowHPEpisode = false
 	c.mu.Unlock()
 }
 
@@ -59,7 +85,7 @@ func (c *EmergencySkillController) SetInputSender(sender func(WebEmergencySkillC
 	c.mu.Unlock()
 }
 
-func (c *EmergencySkillController) sendSkill(slot WebEmergencySkillConfig) bool {
+func (c *EmergencySkillController) sendSkill(slot WebEmergencySkillConfig) (sent bool, attempted bool) {
 	index := slot.Index - 1
 	if index < 0 || index >= emergencySkillSlotCount {
 		index = 0
@@ -68,7 +94,7 @@ func (c *EmergencySkillController) sendSkill(slot WebEmergencySkillConfig) bool 
 	c.mu.Lock()
 	if time.Since(c.lastAttempt[index]) < emergencySkillRepeatCooldown {
 		c.mu.Unlock()
-		return false
+		return false, false
 	}
 	attemptAt := time.Now()
 	c.lastAttempt[index] = attemptAt
@@ -76,7 +102,6 @@ func (c *EmergencySkillController) sendSkill(slot WebEmergencySkillConfig) bool 
 	hwnd := c.hwnd
 	c.mu.Unlock()
 
-	sent := false
 	if sender != nil {
 		sent = sender(slot)
 	} else if slot.Click {
@@ -89,7 +114,7 @@ func (c *EmergencySkillController) sendSkill(slot WebEmergencySkillConfig) bool 
 
 	// Failed input also consumes the short cooldown; otherwise a denied cursor
 	// API call would be retried on every detector frame and starve other work.
-	return sent
+	return sent, true
 }
 
 func (c *EmergencySkillController) IsAnyEnabled() bool {
@@ -126,36 +151,66 @@ func (c *EmergencySkillController) ObserveTargetPanel(present, targetReady bool)
 	c.mu.Unlock()
 }
 
-// ObserveHPPercent attempts every eligible non-target emergency slot while HP
-// is low. Each slot has its own short cooldown, so a fast detector loop cannot
-// flood the input lane. Target-required slots are attempted only after the
-// target panel is visibly active (and, when applicable, has passed the existing
-// skip-target gate). The bool result asks the caller to send one E through
-// BotController's normal target path; that preserves chat guarding and
-// target-name validation.
-func (c *EmergencySkillController) ObserveHPPercent(percent float64, barFound bool, threshold float64) (requestTarget bool) {
+// ObserveHPPercent opens one emergency episode only after a stable low HP-bar
+// reading. Every eligible slot is attempted once in that episode, then stays
+// latched until HP has recovered in two stable scans. Target-required slots
+// are attempted only after the target panel is visibly active (and, when
+// applicable, has passed the existing skip-target gate). The bool result asks
+// the caller to send one E through BotController's normal target path; that
+// preserves chat guarding and target-name validation.
+func (c *EmergencySkillController) ObserveHPPercent(percent float64, barFound bool, threshold float64) (requestTarget bool, events []EmergencySkillEvent) {
 	if !barFound || threshold <= 0 {
-		return false
+		// A missing colour bar is not a recovery. Retain the current episode so
+		// a clipped WGC frame cannot re-arm casts while HP remains low.
+		return false, nil
+	}
+
+	if percent > threshold+emergencyRecoveryMarginPercent {
+		c.mu.Lock()
+		c.lowHPReadings = 0
+		c.recoveredReadings++
+		if c.recoveredReadings >= emergencyRecoveryConfirmations {
+			c.lowHPEpisode = false
+			c.panicTargetSent = false
+			c.lastAttempt = [emergencySkillSlotCount]time.Time{}
+		}
+		c.mu.Unlock()
+		return false, nil
 	}
 
 	if percent > threshold {
+		// Dead band: do not let one frame around the threshold either trigger
+		// an emergency or re-arm the existing low-HP episode.
 		c.mu.Lock()
-		c.panicTargetSent = false
-		c.lastAttempt = [emergencySkillSlotCount]time.Time{}
+		c.lowHPReadings = 0
+		c.recoveredReadings = 0
 		c.mu.Unlock()
-		return false
+		return false, nil
 	}
 
-	c.mu.RLock()
+	c.mu.Lock()
+	c.recoveredReadings = 0
+	if c.lowHPEpisode {
+		c.mu.Unlock()
+		return false, nil
+	}
+	c.lowHPReadings++
+	if c.lowHPReadings < emergencyLowHPConfirmations {
+		c.mu.Unlock()
+		return false, nil
+	}
+	// Latch before sending input: a rapid following WGC sample must not issue
+	// a second cast while the first delivery is still in progress.
+	c.lowHPEpisode = true
 	slots := append([]WebEmergencySkillConfig(nil), c.slots...)
 	targetKnown := c.targetKnown
 	targetPresent := c.targetPresent
 	targetReady := c.targetActionReady
 	canAcquireTarget := c.selfTargeting || c.assistPanicTarget
 	panicTargetSent := c.panicTargetSent
-	c.mu.RUnlock()
+	c.mu.Unlock()
 	if len(slots) == 0 {
-		return false
+		return false, nil
 	}
 
 	hasTargetSlots := false
@@ -164,21 +219,25 @@ func (c *EmergencySkillController) ObserveHPPercent(percent float64, barFound bo
 			hasTargetSlots = true
 			continue
 		}
-		c.sendSkill(slot)
+		if sent, attempted := c.sendSkill(slot); attempted {
+			events = append(events, EmergencySkillEvent{Slot: slot.Index, VK: slot.VK, NeedsTarget: false, Sent: sent})
+		}
 	}
 
 	if !hasTargetSlots {
-		return false
+		return false, events
 	}
 	if targetKnown && targetPresent && targetReady {
 		// The visible Target panel has already settled, so target-only skills can
 		// share this same low-HP cycle without an artificial delay.
 		for _, slot := range slots {
 			if slot.NeedsTarget {
-				c.sendSkill(slot)
+				if sent, attempted := c.sendSkill(slot); attempted {
+					events = append(events, EmergencySkillEvent{Slot: slot.Index, VK: slot.VK, NeedsTarget: true, Sent: sent})
+				}
 			}
 		}
-		return false
+		return false, events
 	}
 
 	// In assist mode, a missing target normally means "do not disturb the
@@ -196,7 +255,7 @@ func (c *EmergencySkillController) ObserveHPPercent(percent float64, barFound bo
 		}
 		c.mu.Unlock()
 	}
-	return requestTarget
+	return requestTarget, events
 }
 
 func (c *EmergencySkillController) MarkTargetRequestFailed() {

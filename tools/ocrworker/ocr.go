@@ -572,6 +572,14 @@ func (o *OCR) RunPartyImageVariants(img image.Image, variantIndexes []int) (*Res
 // resurrection confirmation instead of choosing the longest text in a noisy
 // frame. A full-screen event or a party list can contain far more text than
 // the small Message dialog, so generic bestText is not appropriate here.
+//
+// This is a latency-sensitive path: the game is paused and waiting for one
+// confirmation click. Calling every generic preprocessing variant with both
+// PSM 6 and PSM 11 launched ten Tesseract processes per WGC frame, which can
+// take 7–15 seconds on a lower-spec PC. The dialog is a normal text block, so
+// its grayscale and medium-threshold forms with PSM 6 are the useful passes.
+// Keep one sparse-text fallback for unusual/partly obscured dialogs, for a
+// maximum of three Tesseract processes rather than ten.
 func (o *OCR) RunResurrectionImage(img image.Image) (*Result, error) {
 	if img == nil {
 		return nil, fmt.Errorf("image is nil")
@@ -581,23 +589,31 @@ func (o *OCR) RunResurrectionImage(img image.Image) (*Result, error) {
 	variants := buildOCRVariants(img)
 	var allTexts []string
 
-	// PSM 6 reads the dialog body as a text block; PSM 11 remains useful when
-	// parts of the dialog are obscured by effects or other UI elements.
-	for _, psm := range []string{"6", PartyOCRPSM} {
-		for i, variant := range variants {
-			text, err := o.runTesseractImageWithOptions(variant, i, psm, "")
-			if err != nil {
-				continue
-			}
-			text = normalize(text)
-			if text == "" {
-				continue
-			}
-			if isResurrectionText(text) {
-				return &Result{Text: text, Duration: time.Since(startTotal)}, nil
-			}
-			allTexts = append(allTexts, text)
+	type resurrectionPass struct {
+		variant int
+		psm     string
+	}
+	passes := []resurrectionPass{
+		{variant: 0, psm: "6"},         // grayscale text block: normal fast path
+		{variant: 2, psm: "6"},         // medium threshold: bright text on dark dialog
+		{variant: 0, psm: PartyOCRPSM}, // sparse-text fallback
+	}
+	for _, pass := range passes {
+		if pass.variant >= len(variants) {
+			continue
 		}
+		text, err := o.runTesseractImageWithOptions(variants[pass.variant], pass.variant, pass.psm, "")
+		if err != nil {
+			continue
+		}
+		text = normalize(text)
+		if text == "" {
+			continue
+		}
+		if isResurrectionText(text) {
+			return &Result{Text: text, Duration: time.Since(startTotal)}, nil
+		}
+		allTexts = append(allTexts, text)
 	}
 
 	return &Result{Text: bestText(allTexts), Duration: time.Since(startTotal)}, nil

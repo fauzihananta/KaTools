@@ -1,32 +1,10 @@
 {
   "hwnd": "",
   "autoLogin": {
-    "enabled": true,
-    "folder": "D:\\SteamLibrary\\steamapps\\common\\Kathana",
-    "exe": "KathanaGame.exe",
-    "windowTitle": "",
     "pointers": {
-      "AutoLoginAutoHunt": {
-        "x": 870,
-        "y": 588,
-        "width": 1,
-        "height": 1,
-        "selected": true,
-        "clientWidth": 1920,
-        "clientHeight": 1440
-      },
       "AutoLoginCharacter": {
-        "x": 955,
-        "y": 846,
-        "width": 1,
-        "height": 1,
-        "selected": true,
-        "clientWidth": 1920,
-        "clientHeight": 1440
-      },
-      "AutoLoginOK": {
-        "x": 246,
-        "y": 536,
+        "x": 958,
+        "y": 853,
         "width": 1,
         "height": 1,
         "selected": true,

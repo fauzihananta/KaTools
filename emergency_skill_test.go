@@ -2,6 +2,20 @@ package main
 
 import "testing"
 
+func confirmEmergencyLow(c *EmergencySkillController, percent, threshold float64) bool {
+	requestTarget, _ := c.ObserveHPPercent(percent, true, threshold)
+	if requestTarget {
+		return true
+	}
+	requestTarget, _ = c.ObserveHPPercent(percent, true, threshold)
+	return requestTarget
+}
+
+func confirmEmergencyRecovery(c *EmergencySkillController, percent, threshold float64) {
+	c.ObserveHPPercent(percent, true, threshold)
+	c.ObserveHPPercent(percent, true, threshold)
+}
+
 func TestEmergencySkillAcceptsOnlyNumberAndFunctionKeys(t *testing.T) {
 	if !isEmergencySkillVK(0x31) || !isEmergencySkillVK(0x70) || !isEmergencySkillVK(0x79) {
 		t.Fatal("valid emergency skill key was rejected")
@@ -37,14 +51,14 @@ func TestEmergencyTargetIsRequestedOncePerLowHPEpisode(t *testing.T) {
 		}},
 	})
 	c.ObserveTargetPanel(false, true)
-	if !c.ObserveHPPercent(50, true, 70) {
+	if !confirmEmergencyLow(c, 50, 70) {
 		t.Fatal("solo target-required emergency should request E when no target is active")
 	}
-	if c.ObserveHPPercent(50, true, 70) {
+	if request, _ := c.ObserveHPPercent(50, true, 70); request {
 		t.Fatal("E must not repeat during the same low-HP episode")
 	}
-	c.ObserveHPPercent(90, true, 70)
-	if !c.ObserveHPPercent(50, true, 70) {
+	confirmEmergencyRecovery(c, 90, 70)
+	if !confirmEmergencyLow(c, 50, 70) {
 		t.Fatal("HP recovery must re-arm emergency target acquisition")
 	}
 }
@@ -58,7 +72,7 @@ func TestAssistEmergencyDoesNotTargetWithoutPanicOption(t *testing.T) {
 		}},
 	})
 	c.ObserveTargetPanel(false, true)
-	if c.ObserveHPPercent(50, true, 70) {
+	if confirmEmergencyLow(c, 50, 70) {
 		t.Fatal("ordinary assist mode must not send E")
 	}
 
@@ -71,7 +85,7 @@ func TestAssistEmergencyDoesNotTargetWithoutPanicOption(t *testing.T) {
 		}},
 	})
 	c.ObserveTargetPanel(false, true)
-	if !c.ObserveHPPercent(50, true, 70) {
+	if !confirmEmergencyLow(c, 50, 70) {
 		t.Fatal("Assist Panic Target should request one E when no target is active")
 	}
 }
@@ -85,7 +99,7 @@ func TestAssistPanicDoesNotWaitForFirstTargetMonitorFrame(t *testing.T) {
 			NeedsTarget: true,
 		}},
 	})
-	if !c.ObserveHPPercent(50, true, 70) {
+	if !confirmEmergencyLow(c, 50, 70) {
 		t.Fatal("Assist Panic Target should acquire once even before the first target-panel sample")
 	}
 }
@@ -111,12 +125,21 @@ func TestEmergencySkillCooldownPreventsScannerFlood(t *testing.T) {
 		t.Fatalf("two adjacent low-HP scans sent %d emergency casts, want 1", sent)
 	}
 
-	// A recovered-then-low episode must fire immediately rather than inherit
-	// the previous episode's cooldown.
-	c.ObserveHPPercent(90, true, 70)
+	// Even after its old cooldown would have elapsed, this low-HP episode gets
+	// exactly one cast. Two stable recovered samples are needed to re-arm.
+	c.mu.Lock()
+	c.lastAttempt[0] = c.lastAttempt[0].Add(-emergencySkillRepeatCooldown)
+	c.mu.Unlock()
+	c.ObserveHPPercent(50, true, 70)
+	if sent != 1 {
+		t.Fatalf("sustained low HP sent %d total emergency casts, want 1", sent)
+	}
+
+	confirmEmergencyRecovery(c, 90, 70)
+	c.ObserveHPPercent(50, true, 70)
 	c.ObserveHPPercent(50, true, 70)
 	if sent != 2 {
-		t.Fatalf("new low-HP episode sent %d total emergency casts, want 2", sent)
+		t.Fatalf("new confirmed low-HP episode sent %d total emergency casts, want 2", sent)
 	}
 }
 
@@ -134,7 +157,49 @@ func TestEmergencySkillFailureStillConsumesCooldown(t *testing.T) {
 
 	c.ObserveHPPercent(50, true, 70)
 	c.ObserveHPPercent(50, true, 70)
+	c.ObserveHPPercent(50, true, 70)
 	if attempts != 1 {
-		t.Fatalf("two adjacent failed sends made %d attempts, want 1", attempts)
+		t.Fatalf("confirmed low-HP episode made %d failed attempts, want 1", attempts)
+	}
+}
+
+func TestEmergencySkillIgnoresOneNoisyLowBarReading(t *testing.T) {
+	c := NewEmergencySkillController(0, WebBotConfig{EmergencySkills: []WebEmergencySkillConfig{{
+		Index:   1,
+		Enabled: true,
+		VK:      0x31,
+	}}})
+	sent := 0
+	c.SetInputSender(func(WebEmergencySkillConfig) bool {
+		sent++
+		return true
+	})
+
+	// One bad low percentage followed by a normal bar must not cast.
+	c.ObserveHPPercent(20, true, 70)
+	confirmEmergencyRecovery(c, 90, 70)
+	if sent != 0 {
+		t.Fatalf("one noisy low bar reading sent %d casts, want 0", sent)
+	}
+}
+
+func TestEmergencySkillRequiresStableRecoveryToRearm(t *testing.T) {
+	c := NewEmergencySkillController(0, WebBotConfig{EmergencySkills: []WebEmergencySkillConfig{{
+		Index:   1,
+		Enabled: true,
+		VK:      0x31,
+	}}})
+	sent := 0
+	c.SetInputSender(func(WebEmergencySkillConfig) bool {
+		sent++
+		return true
+	})
+
+	confirmEmergencyLow(c, 20, 70)
+	c.ObserveHPPercent(90, true, 70) // one noisy recovery must not re-arm
+	c.ObserveHPPercent(20, true, 70)
+	c.ObserveHPPercent(20, true, 70)
+	if sent != 1 {
+		t.Fatalf("one recovery frame re-armed emergency: %d casts, want 1", sent)
 	}
 }

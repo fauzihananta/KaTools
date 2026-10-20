@@ -1882,6 +1882,7 @@ func runPicker(
 		text       string
 		err        error
 		foreground bool
+		duration   time.Duration
 	}
 	resurrectionOCRResultCh := make(chan resurrectionOCREvent, 1)
 	resurrectionOCRBusy := false
@@ -1938,6 +1939,7 @@ func runPicker(
 	var lastDeathOCRAt time.Time
 	var lastDeathDialogCheckAt time.Time
 	var lastResurrectionOCRAt time.Time
+	var lastResurrectionDiagnosticAt time.Time
 	var lastDCDialogCheckAt time.Time
 	var lastDCOCRAt time.Time
 	var lastTargetNameSignature uint64
@@ -2136,8 +2138,24 @@ func runPicker(
 		if !deathPaused {
 			logAutoPotEvents(autoPot.ObserveBarPercents(hpPercent, hpOK, tpPercent, tpOK))
 		}
-		if !deathPaused && emergency != nil && bot.IsRunning() {
-			if emergency.ObserveHPPercent(hpPercent, hpOK, autoPot.HPThreshold()) {
+		// Emergency skills use only the fast, colour-bar percentage. Do not arm
+		// them while WGC is still probing offsets: a red effect in a wrong crop
+		// could otherwise look like low HP before Status OCR has verified the
+		// selected HUD area.
+		if !deathPaused && captureOffsetCalibrated && emergency != nil && bot.IsRunning() {
+			requestTarget, emergencyEvents := emergency.ObserveHPPercent(hpPercent, hpOK, autoPot.HPThreshold())
+			for _, emergencyEvent := range emergencyEvents {
+				appendOCRLog(
+					"EMERGENCY | HP=%.1f%% <= %.1f%% confirmed | Slot=%d VK=%d NeedsTarget=%t Sent=%t",
+					hpPercent,
+					autoPot.HPThreshold(),
+					emergencyEvent.Slot,
+					emergencyEvent.VK,
+					emergencyEvent.NeedsTarget,
+					emergencyEvent.Sent,
+				)
+			}
+			if requestTarget {
 				// A target-required Emergency skill is allowed to acquire a
 				// target normally. The sole exception is Support's confirmed
 				// target-clear window: wait until its held non-With Target skills
@@ -2849,15 +2867,22 @@ func runPicker(
 					sent = pressEnterToWindow(uintptr(hwnd))
 				}
 				if sent && deathPause.MarkResurrectionAttempted() {
-					appendOCRLog("AUTO RESU | Resurrection prompt verified | Input=%s attempt sent | Waiting for dialog confirmation; will retry if still visible", method)
+					appendOCRLog("AUTO RESU | Resurrection prompt verified | OCR=%s | Input=%s attempt sent | Waiting for dialog confirmation; will retry if still visible", event.duration, method)
 				} else {
-					appendOCRLog("AUTO RESU | Resurrection prompt verified | Input=%s failed | Waiting", method)
+					appendOCRLog("AUTO RESU | Resurrection prompt verified | OCR=%s | Input=%s failed | Waiting", event.duration, method)
 				}
 			} else if deathPause != nil && deathPause.ShouldScanResurrection() {
 				visible := event.err == nil && isResurrectionPrompt(event.text) && event.foreground
 				deathPause.ObserveResurrectionPrompt(visible)
 				if event.err == nil && isResurrectionPrompt(event.text) && !event.foreground {
 					appendOCRLog("AUTO RESU | Resurrection text found but dialog is not foreground | Waiting")
+				} else if time.Since(lastResurrectionDiagnosticAt) >= 5*time.Second {
+					lastResurrectionDiagnosticAt = time.Now()
+					if event.err != nil {
+						appendOCRLog("AUTO RESU | OCR failed after %s | %v", event.duration, event.err)
+					} else {
+						appendOCRLog("AUTO RESU | OCR not confirmed | OCR=%s | Foreground=%t | Text=%q", event.duration, event.foreground, oCRTextForLog(event.text))
+					}
 				}
 			}
 		default:
@@ -3523,10 +3548,12 @@ func runPicker(
 					resurrectionOCRBusy = true
 					lastResurrectionOCRAt = time.Now()
 					go func(img image.Image) {
+						started := time.Now()
 						result, err := resurrectionOCR.RunResurrectionImage(img)
 						event := resurrectionOCREvent{
 							err:        err,
 							foreground: resurrectionDialogLooksForeground(img),
+							duration:   time.Since(started),
 						}
 						if result != nil {
 							event.text = result.Text
