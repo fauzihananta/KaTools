@@ -80,7 +80,11 @@ func (p *DeathPauseController) AutoResurrectEnabled() bool {
 func (p *DeathPauseController) ShouldScanResurrection() bool {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	return p.enabled && p.waitingResurrection && !p.resurrectionAccepted && !p.deathDialogCleared
+	// The ordinary death Message dialog is replaced by the resurrection prompt.
+	// Those two dialogs do not necessarily share the same dark-pixel shape, so
+	// deathDialogCleared only says that the *old* dialog has gone away. It must
+	// not stop resurrection OCR before the replacement prompt is read.
+	return p.enabled && p.waitingResurrection && !p.resurrectionAccepted
 }
 
 // MarkResurrectionAttempted records only that Windows accepted the input
@@ -90,7 +94,7 @@ func (p *DeathPauseController) ShouldScanResurrection() bool {
 func (p *DeathPauseController) MarkResurrectionAttempted() bool {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if !p.enabled || !p.waitingResurrection || p.resurrectionAccepted || p.deathDialogCleared {
+	if !p.enabled || !p.waitingResurrection || p.resurrectionAccepted {
 		return false
 	}
 	p.resurrectionAttempted = true
@@ -155,9 +159,11 @@ func (p *DeathPauseController) ObserveDeathDialog(visible bool) {
 	}
 }
 
-// RememberDeathDialog stores the visual fingerprint from the exact frame in
-// which OCR confirmed the respawn message. Future scans compare against this
-// fingerprint instead of trying to guess a dialog from generic dark pixels.
+// RememberDeathDialog stores the visual fingerprint from an OCR-confirmed
+// death/resurrection dialog. Future scans compare against this fingerprint
+// instead of trying to guess a dialog from generic dark pixels. A confirmed
+// resurrection prompt replaces the ordinary death dialog, so it also becomes
+// the dialog that must disappear before HP may resume the bot.
 func (p *DeathPauseController) RememberDeathDialog(mask deathDialogMask) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -166,6 +172,9 @@ func (p *DeathPauseController) RememberDeathDialog(mask deathDialogMask) {
 	}
 	p.dialogMask = mask
 	p.hasDialogMask = true
+	p.deathDialogCleared = false
+	p.dialogClearScans = 0
+	p.healthyScans = 0
 }
 
 func (p *DeathPauseController) DeathDialogMatches(mask deathDialogMask) bool {

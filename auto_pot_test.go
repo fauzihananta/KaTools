@@ -208,6 +208,34 @@ func TestAutoPotCalibratesOverestimatedBarPercent(t *testing.T) {
 	}
 }
 
+func TestAutoPotManualMaximumUsesBarInsteadOfOCR(t *testing.T) {
+	p := NewAutoPotController(0, WebBotConfig{
+		AutoPotHPManualMax: 1343,
+		AutoPotTPManualMax: 4851,
+	})
+
+	// A bad OCR reading must not replace a user-confirmed maximum.
+	p.Observe(1437, 1437, 4744, 4851)
+	p.ObserveBarPercents(75, true, 80, true)
+	status := p.Status()
+	if status.HPCurrent != 1007 || status.HPMax != 1343 {
+		t.Fatalf("manual HP = %d/%d, want 1007/1343", status.HPCurrent, status.HPMax)
+	}
+	if status.TPCurrent != 3881 || status.TPMax != 4851 {
+		t.Fatalf("manual TP = %d/%d, want 3881/4851", status.TPCurrent, status.TPMax)
+	}
+}
+
+func TestAutoPotAcceptsSmallManualMaximumButNotSmallOCRMaximum(t *testing.T) {
+	p := NewAutoPotController(0, WebBotConfig{AutoPotHPManualMax: 75})
+	p.Observe(65, 65, 0, 0) // OCR noise must not overwrite manual HP.
+	p.ObserveBarPercents(80, true, 0, false)
+	status := p.Status()
+	if status.HPMax != 75 || status.HPCurrent != 60 {
+		t.Fatalf("small manual HP = %d/%d, want 60/75", status.HPCurrent, status.HPMax)
+	}
+}
+
 func TestStatusPairMatchesBarRejectsIncorrectFullTP(t *testing.T) {
 	if statusPairMatchesBar(23964, 23964, 94.7, true) {
 		t.Fatal("full OCR value was accepted despite a visibly non-full bar")

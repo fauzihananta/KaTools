@@ -36,7 +36,7 @@
     "clientHeight": 1440
   },
   "AutoAccept": {
-    "x": 933,
+    "x": 934,
     "y": 765,
     "width": 1,
     "height": 1,
@@ -45,8 +45,8 @@
     "clientHeight": 1440
   },
   "AutoLoginAutoHunt": {
-    "x": 864,
-    "y": 584,
+    "x": 869,
+    "y": 585,
     "width": 1,
     "height": 1,
     "selected": true,
@@ -54,8 +54,8 @@
     "clientHeight": 1440
   },
   "AutoLoginCharacter": {
-    "x": 958,
-    "y": 853,
+    "x": 956,
+    "y": 852,
     "width": 1,
     "height": 1,
     "selected": true,
@@ -63,8 +63,8 @@
     "clientHeight": 1440
   },
   "AutoLoginOK": {
-    "x": 244,
-    "y": 532,
+    "x": 236,
+    "y": 535,
     "width": 1,
     "height": 1,
     "selected": true,
@@ -72,8 +72,8 @@
     "clientHeight": 1440
   },
   "AutoReject": {
-    "x": 1065,
-    "y": 763,
+    "x": 1063,
+    "y": 768,
     "width": 1,
     "height": 1,
     "selected": true,
@@ -99,8 +99,8 @@
     "clientHeight": 1440
   },
   "DCOk": {
-    "x": 1061,
-    "y": 769,
+    "x": 1060,
+    "y": 764,
     "width": 1,
     "height": 1,
     "selected": true,
@@ -117,8 +117,8 @@
     "clientHeight": 1440
   },
   "HP": {
-    "x": 1789,
-    "y": 904,
+    "x": 1793,
+    "y": 852,
     "width": 1,
     "height": 1,
     "selected": true,

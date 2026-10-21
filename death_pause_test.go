@@ -129,6 +129,40 @@ func TestIgnoredResurrectionClickIsRetried(t *testing.T) {
 	}
 }
 
+func TestResurrectionScanSurvivesReplacementOfDeathDialog(t *testing.T) {
+	p := NewDeathPauseController(true, true)
+	if !p.TriggerOnce() {
+		t.Fatal("death state was not entered")
+	}
+
+	// The first death dialog disappears before the resurrection prompt has
+	// completed its two OCR confirmations. This is the normal UI transition,
+	// not proof that it is safe to resume or stop looking for Auto Resu.
+	p.ObserveDeathDialog(true)
+	p.ObserveDeathDialog(false)
+	p.ObserveDeathDialog(false)
+	if !p.ShouldScanResurrection() {
+		t.Fatal("resurrection scan stopped when the original death dialog changed")
+	}
+
+	if p.ObserveResurrectionPrompt(true) || !p.ObserveResurrectionPrompt(true) {
+		t.Fatal("replacement resurrection prompt was not confirmed")
+	}
+
+	// Once verified, the new prompt becomes the dialog that must disappear
+	// before the health-based resume path may run.
+	dialog := image.NewRGBA(image.Rect(0, 0, 160, 80))
+	for y := 10; y < 70; y++ {
+		for x := 10; x < 150; x++ {
+			dialog.Set(x, y, color.RGBA{8, 8, 8, 255})
+		}
+	}
+	p.RememberDeathDialog(deathDialogMaskFromImage(dialog))
+	if p.ShouldWatchHP() {
+		t.Fatal("health recovery started while the verified resurrection prompt was visible")
+	}
+}
+
 func TestResurrectionDialogForegroundAppearance(t *testing.T) {
 	active := image.NewRGBA(image.Rect(0, 0, 160, 80))
 	for y := 25; y < 35; y++ {

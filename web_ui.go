@@ -724,7 +724,7 @@ select:focus { border-color: var(--accent-cyan); box-shadow: 0 0 0 2px rgba(34,2
 
 .pot-card {
   display: grid;
-  grid-template-columns: auto 1fr 72px 88px;
+  grid-template-columns: auto minmax(90px, 1fr) 72px minmax(138px, 1fr) 88px;
   align-items: center;
   gap: 8px;
   background: var(--bg-card);
@@ -1302,6 +1302,7 @@ body.click-input-mode #deathROIInfo, body.click-input-mode #deathROIPreview { di
 					<input type="checkbox" id="autoPotHP" disabled>
 					<label for="autoPotHP">HP Pot</label>
 					<input type="text" inputmode="decimal" class="numeric-input" id="autoPotHPPercent" value="0" placeholder="%">
+					<input type="text" inputmode="numeric" class="numeric-input" id="autoPotHPManualMax" value="" placeholder="Max HP (optional)" title="Manual Max HP: use the true full HP value to calculate live HP from the red bar, without relying on OCR." aria-label="Manual Max HP, optional">
 					<select id="autoPotHPSlot"><option value="49">1</option><option value="50">2</option><option value="51">3</option><option value="52">4</option><option value="53">5</option><option value="54">6</option><option value="55">7</option><option value="56">8</option><option value="57">9</option><option value="48">0</option><option value="112">F1</option><option value="113">F2</option><option value="114">F3</option><option value="115">F4</option><option value="116">F5</option><option value="117">F6</option><option value="118">F7</option><option value="119">F8</option><option value="120">F9</option><option value="121">F10</option></select>
 					<div class="click-area-controls" id="clickAreaControlsHP" hidden><span class="click-area-status" id="clickAreaStatusHP">HP area not set</span><div class="click-area-buttons"><button type="button" onclick="openClickSkillPicker('HP')">SET AREA</button><button type="button" id="clickAreaResetHP" onclick="resetClickSkillArea('HP')">RESET</button></div></div>
 				</div>
@@ -1309,6 +1310,7 @@ body.click-input-mode #deathROIInfo, body.click-input-mode #deathROIPreview { di
 					<input type="checkbox" id="autoPotTP" disabled>
 					<label for="autoPotTP">TP Pot</label>
 					<input type="text" inputmode="decimal" class="numeric-input" id="autoPotTPPercent" value="0" placeholder="%">
+					<input type="text" inputmode="numeric" class="numeric-input" id="autoPotTPManualMax" value="" placeholder="Max TP (optional)" title="Manual Max TP: use the true full TP value to calculate live TP from the blue bar, without relying on OCR." aria-label="Manual Max TP, optional">
 					<select id="autoPotTPSlot"><option value="49">1</option><option value="50">2</option><option value="51">3</option><option value="52">4</option><option value="53">5</option><option value="54">6</option><option value="55">7</option><option value="56">8</option><option value="57">9</option><option value="48">0</option><option value="112">F1</option><option value="113">F2</option><option value="114">F3</option><option value="115">F4</option><option value="116">F5</option><option value="117">F6</option><option value="118">F7</option><option value="119">F8</option><option value="120">F9</option><option value="121">F10</option></select>
 					<div class="click-area-controls" id="clickAreaControlsTP" hidden><span class="click-area-status" id="clickAreaStatusTP">TP area not set</span><div class="click-area-buttons"><button type="button" onclick="openClickSkillPicker('TP')">SET AREA</button><button type="button" id="clickAreaResetTP" onclick="resetClickSkillArea('TP')">RESET</button></div></div>
 				</div>
@@ -1574,7 +1576,7 @@ body.click-input-mode #deathROIInfo, body.click-input-mode #deathROIPreview { di
 			<h2 id="configProfileTitle">Save Character Config</h2>
 			<p id="configProfileHint">Enter the character name for this config.</p>
 			<input id="configProfileName" type="text" maxlength="48" autocomplete="off" placeholder="Character name">
-			<select id="configProfileList" hidden></select>
+			<select id="configProfileList" hidden onchange="selectSaveConfigProfile(this.value)"></select>
 			<div class="config-profile-dialog-actions">
 				<button type="button" onclick="closeConfigProfileDialog()">CANCEL</button>
 				<button id="configProfileConfirm" type="button" onclick="confirmConfigProfileDialog()">SAVE</button>
@@ -1657,6 +1659,7 @@ let botHasStarted = false;
 let onlineAccessAllowed = false;
 let targetROIReady = false;
 let windowsLoading = false;
+const tabScrollPositions = {};
 
 function scrollPageTo(edge) {
 	const top = edge === "bottom" ? document.documentElement.scrollHeight : 0;
@@ -1676,12 +1679,23 @@ window.addEventListener("resize", updateScrollNav);
 requestAnimationFrame(updateScrollNav);
 
 function showTab(tabName) {
+	const previousPanel = document.querySelector(".tab-panel.active");
+	if (previousPanel) {
+		tabScrollPositions[previousPanel.id] = window.scrollY;
+	}
 	for (const panel of document.querySelectorAll(".tab-panel")) {
 		panel.classList.toggle("active", panel.id === tabName + "Tab");
 	}
 	for (const button of document.querySelectorAll(".tab-button")) {
 		button.classList.toggle("active", button.dataset.tab === tabName);
 	}
+	// Hidden panels have no layout height. Restore this tab only after its
+	// layout is active; otherwise switching through a short tab clamps the
+	// document to the top and loses the longer tab's last position.
+	requestAnimationFrame(function() {
+		window.scrollTo({ top: tabScrollPositions[tabName + "Tab"] || 0, behavior: "auto" });
+		requestAnimationFrame(updateScrollNav);
+	});
 }
 
 function setTheme(theme) {
@@ -2240,9 +2254,11 @@ function getConfig() {
 
 		autoPotHPEnabled: document.getElementById("autoPotHP").checked,
 		autoPotHPPercent: Number(document.getElementById("autoPotHPPercent").value),
+		autoPotHPManualMax: Number(document.getElementById("autoPotHPManualMax").value),
 		autoPotHPSlotVK: Number(document.getElementById("autoPotHPSlot").value),
 		autoPotTPEnabled: document.getElementById("autoPotTP").checked,
 		autoPotTPPercent: Number(document.getElementById("autoPotTPPercent").value),
+		autoPotTPManualMax: Number(document.getElementById("autoPotTPManualMax").value),
 		autoPotTPSlotVK: Number(document.getElementById("autoPotTPSlot").value),
 
 		emergencySkills: Array.from({ length: 5 }, function(_, index) {
@@ -2291,6 +2307,8 @@ function numericConfigError(config) {
 	let error = "";
 	if (config.autoPotHPEnabled && (error = percent(config.autoPotHPPercent, "HP Pot threshold"))) return error;
 	if (config.autoPotTPEnabled && (error = percent(config.autoPotTPPercent, "TP Pot threshold"))) return error;
+	if (config.autoPotHPManualMax && (!Number.isInteger(config.autoPotHPManualMax) || config.autoPotHPManualMax < 1)) return "Max HP must be a whole number greater than zero.";
+	if (config.autoPotTPManualMax && (!Number.isInteger(config.autoPotTPManualMax) || config.autoPotTPManualMax < 1)) return "Max TP must be a whole number greater than zero.";
 	if (config.assistSkillVK !== 0 && (error = positive(config.assistSkillDelay, "Assist skill interval"))) return error;
 	if (config.targetEnabled && (error = positive(config.targetDelay, "Target interval"))) return error;
 	const supportMode = config.targetUntilDeadEnabled && config.targetUntilDeadSupport;
@@ -2560,9 +2578,11 @@ function applySavedConfig(config) {
 	document.getElementById("pickDelay").value = config.pickDelay || "";
 	document.getElementById("autoPotHP").checked = !!config.autoPotHPEnabled;
 	document.getElementById("autoPotHPPercent").value = config.autoPotHPPercent || "";
+	document.getElementById("autoPotHPManualMax").value = config.autoPotHPManualMax || "";
 	document.getElementById("autoPotHPSlot").value = config.autoPotHPSlotVK || "49";
 	document.getElementById("autoPotTP").checked = !!config.autoPotTPEnabled;
 	document.getElementById("autoPotTPPercent").value = config.autoPotTPPercent || "";
+	document.getElementById("autoPotTPManualMax").value = config.autoPotTPManualMax || "";
 	document.getElementById("autoPotTPSlot").value = config.autoPotTPSlotVK || "49";
 	for (let index = 0; index < 5; index++) {
 		const slot = (config.emergencySkills || [])[index] || {};
@@ -2613,19 +2633,48 @@ function closeConfigProfileDialog() {
 	configProfileDialogMode = "";
 }
 
-function openSaveConfigDialog() {
+function selectSaveConfigProfile(name) {
+	if (configProfileDialogMode !== "save") return;
+	const input = document.getElementById("configProfileName");
+	input.value = name || "";
+	input.placeholder = name ? "Selected config name" : "New character name";
+	input.focus();
+}
+
+async function openSaveConfigDialog() {
+	try {
+		const configProfiles = await getConfigProfileNames();
+		configProfileNames = configProfiles.profiles;
+	} catch (error) {
+		console.error("Failed to list config profiles", error);
+		alert(error.message || "Failed to load config profiles.");
+		return;
+	}
 	configProfileDialogMode = "save";
 	const modal = document.getElementById("configProfileModal");
 	const input = document.getElementById("configProfileName");
 	const list = document.getElementById("configProfileList");
 	document.getElementById("configProfileTitle").innerText = "Save Character Config";
-	document.getElementById("configProfileHint").innerText = "Enter the character name for this config.";
+	document.getElementById("configProfileHint").innerText = "Select a saved config to replace, or choose Create new config and enter a name.";
 	document.getElementById("configProfileConfirm").innerText = "SAVE";
-	list.hidden = true;
+	list.replaceChildren();
+	const createOption = document.createElement("option");
+	createOption.value = "";
+	createOption.textContent = "+ Create new config...";
+	list.appendChild(createOption);
+	for (const name of configProfileNames) {
+		const option = document.createElement("option");
+		option.value = name;
+		option.textContent = name;
+		list.appendChild(option);
+	}
+	list.value = "";
+	list.hidden = false;
 	input.hidden = false;
 	input.value = "";
+	input.placeholder = "New character name";
 	modal.hidden = false;
-	input.focus();
+	list.focus();
 }
 
 async function openLoadConfigDialog() {
@@ -2917,7 +2966,7 @@ function updateWindowDependentControls() {
 		for (const id of ["autoAccept", "partyInviteAccept", "partyInviteReject", "autoPauseDeath", "autoResurrect", "autoPotHP", "autoPotTP"]) {
 			document.getElementById(id).disabled = true;
 		}
-		for (const id of ["autoPotHPPercent", "autoPotHPSlot", "autoPotTPPercent", "autoPotTPSlot"]) {
+		for (const id of ["autoPotHPPercent", "autoPotHPManualMax", "autoPotHPSlot", "autoPotTPPercent", "autoPotTPManualMax", "autoPotTPSlot"]) {
 			document.getElementById(id).disabled = true;
 		}
 		syncAutoLoginControls();
@@ -3854,7 +3903,7 @@ function updateAutoPotAvailability(selected) {
 		checkbox.disabled = !enabled;
 		if (!selected) checkbox.checked = false;
 	}
-	for (const id of ["autoPotHPPercent", "autoPotHPSlot", "autoPotTPPercent", "autoPotTPSlot"]) {
+	for (const id of ["autoPotHPPercent", "autoPotHPManualMax", "autoPotHPSlot", "autoPotTPPercent", "autoPotTPManualMax", "autoPotTPSlot"]) {
 		document.getElementById(id).disabled = !enabled;
 	}
 	syncEmergencySkillSlots();
@@ -4102,14 +4151,16 @@ type WebBotConfig struct {
 	PickEnabled bool    `json:"pickEnabled"`
 	PickDelay   float64 `json:"pickDelay"`
 
-	AutoPotHPEnabled  bool                      `json:"autoPotHPEnabled"`
-	AutoPotHPPercent  float64                   `json:"autoPotHPPercent"`
-	AutoPotHPSlotVK   uintptr                   `json:"autoPotHPSlotVK"`
-	AutoPotTPEnabled  bool                      `json:"autoPotTPEnabled"`
-	AutoPotTPPercent  float64                   `json:"autoPotTPPercent"`
-	AutoPotTPSlotVK   uintptr                   `json:"autoPotTPSlotVK"`
-	EmergencySkills   []WebEmergencySkillConfig `json:"emergencySkills"`
-	AssistPanicTarget bool                      `json:"assistPanicTarget"`
+	AutoPotHPEnabled   bool                      `json:"autoPotHPEnabled"`
+	AutoPotHPPercent   float64                   `json:"autoPotHPPercent"`
+	AutoPotHPManualMax int                       `json:"autoPotHPManualMax"`
+	AutoPotHPSlotVK    uintptr                   `json:"autoPotHPSlotVK"`
+	AutoPotTPEnabled   bool                      `json:"autoPotTPEnabled"`
+	AutoPotTPPercent   float64                   `json:"autoPotTPPercent"`
+	AutoPotTPManualMax int                       `json:"autoPotTPManualMax"`
+	AutoPotTPSlotVK    uintptr                   `json:"autoPotTPSlotVK"`
+	EmergencySkills    []WebEmergencySkillConfig `json:"emergencySkills"`
+	AssistPanicTarget  bool                      `json:"assistPanicTarget"`
 
 	// Skills is the established Attacker/normal profile. SupportSkills is a
 	// separate 1–5 profile selected only by Target Until Dead > Support, so
@@ -4279,6 +4330,12 @@ func validateNumericConfig(cfg WebBotConfig) string {
 		if message := validPercent(cfg.AutoPotTPPercent, "TP Pot threshold"); message != "" {
 			return message
 		}
+	}
+	if cfg.AutoPotHPManualMax < 0 {
+		return "Max HP must be a whole number greater than zero."
+	}
+	if cfg.AutoPotTPManualMax < 0 {
+		return "Max TP must be a whole number greater than zero."
 	}
 	if cfg.AssistSkillVK != 0 && !cfg.ClickMethod() {
 		if message := validPositive(cfg.AssistSkillDelay, "Assist skill interval"); message != "" {

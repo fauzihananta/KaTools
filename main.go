@@ -1883,9 +1883,14 @@ func runPicker(
 		err        error
 		foreground bool
 		duration   time.Duration
+		dialogMask deathDialogMask
 	}
 	resurrectionOCRResultCh := make(chan resurrectionOCREvent, 1)
 	resurrectionOCRBusy := false
+	type chatTextCharacterPoint struct {
+		x, y, referenceWidth, referenceHeight int
+		ok                                    bool
+	}
 	type chatTextEvent struct {
 		keyword                             string
 		yOffset                             int
@@ -1903,8 +1908,15 @@ func runPicker(
 		originX, originY                    int
 		offsetX, offsetY                    int
 		err                                 error
+		recheckResponse                     chan chatTextCharacterPoint
+	}
+	type chatTextRecheckRequest struct {
+		keyword  string
+		yOffset  int
+		response chan chatTextCharacterPoint
 	}
 	chatTextResultCh := make(chan chatTextEvent, 1)
+	chatTextRecheckRequestCh := make(chan chatTextRecheckRequest, 1)
 	chatTextOCRBusy := false
 	chatTextClickBusy := false
 	chatTextClickDoneCh := make(chan bool, 1)
@@ -1912,6 +1924,7 @@ func runPicker(
 	var lastChatTextDiagnosticAt time.Time
 	var chatTextLatched bool
 	var chatTextCooldownUntil time.Time
+	var chatTextRecheckPending *chatTextRecheckRequest
 	logChatTextDiagnostic := func(format string, args ...any) {
 		if time.Since(lastChatTextDiagnosticAt) < 5*time.Second {
 			return
@@ -2446,8 +2459,41 @@ func runPicker(
 			} else {
 				chatTextLatched = false
 			}
+		case request := <-chatTextRecheckRequestCh:
+			// This request arrives only after Party mode has had time to arm. Force
+			// the next OCR crop instead of waiting for the normal chat cadence.
+			chatTextRecheckPending = &request
+			lastChatTextScanAt = time.Time{}
 		case event := <-chatTextResultCh:
 			chatTextOCRBusy = false
+			if event.recheckResponse != nil {
+				point := chatTextCharacterPoint{}
+				if event.err == nil && event.match != nil && event.pointValid {
+					point = chatTextCharacterPoint{x: event.clientX, y: event.clientY, referenceWidth: event.referenceWidth, referenceHeight: event.referenceHeight, ok: true}
+					clickAreas := LoadClickSkillROIs()
+					if _, collision := chatTextCombatPointCollision(point.x, point.y, point.referenceWidth, point.referenceHeight, clickAreas); collision {
+						if event.fallbackPointValid {
+							if _, fallbackCollision := chatTextCombatPointCollision(event.fallbackClientX, event.fallbackClientY, point.referenceWidth, point.referenceHeight, clickAreas); !fallbackCollision {
+								point.x, point.y = event.fallbackClientX, event.fallbackClientY
+							} else {
+								point.ok = false
+							}
+						} else {
+							point.ok = false
+						}
+					}
+				}
+				if point.ok {
+					appendOCRLog("CHAT TEXT RECHECK | Keyword=%q | FreshCharacterPoint=%d,%d in %dx%d", event.keyword, point.x, point.y, point.referenceWidth, point.referenceHeight)
+				} else {
+					appendOCRLog("CHAT TEXT RECHECK | Keyword=%q | Fresh character location not found", event.keyword)
+				}
+				select {
+				case event.recheckResponse <- point:
+				case <-stopCh:
+				}
+				continue
+			}
 			if event.err != nil {
 				appendOCRLog("CHAT TEXT OCR | failed | %v", event.err)
 				break
@@ -2494,10 +2540,24 @@ func runPicker(
 				appendOCRLog("CHAT TEXT CLICK REQUEST | Keyword=%q | Match=%q | Anchor=%q | PartyPoint=%d,%d | CharacterPoint=%d,%d in %dx%d | YOffset=%d | Scale=%.4f,%.4f | CaptureOffset=%d,%d", keyword, event.match.Text, event.anchorText, partyArea.X+partyArea.Width/2, partyArea.Y+partyArea.Height/2, event.clientX, event.clientY, event.referenceWidth, event.referenceHeight, event.yOffset, event.scaleX, event.scaleY, event.offsetX, event.offsetY)
 				chatTextClickBusy = true
 				go func(event chatTextEvent, keyword string, partyArea ClickSkillROI) {
-					ok := bot.CastClickAction2(
+					ok := bot.CastClickAction2WithLocator(
 						uintptr(hwnd),
 						partyArea.X+partyArea.Width/2, partyArea.Y+partyArea.Height/2, partyArea.ClientWidth, partyArea.ClientHeight,
-						event.clientX, event.clientY, event.referenceWidth, event.referenceHeight,
+						func(stop <-chan struct{}) (int, int, int, int, bool) {
+							response := make(chan chatTextCharacterPoint, 1)
+							request := chatTextRecheckRequest{keyword: keyword, yOffset: event.yOffset, response: response}
+							select {
+							case chatTextRecheckRequestCh <- request:
+							case <-stop:
+								return 0, 0, 0, 0, false
+							}
+							select {
+							case point := <-response:
+								return point.x, point.y, point.referenceWidth, point.referenceHeight, point.ok
+							case <-stop:
+								return 0, 0, 0, 0, false
+							}
+						},
 					)
 					if !ok {
 						appendOCRLog("CHAT TEXT FLOW FAILED | Keyword=%q | PartyPoint=%d,%d | CharacterPoint=%d,%d", keyword, partyArea.X+partyArea.Width/2, partyArea.Y+partyArea.Height/2, event.clientX, event.clientY)
@@ -2856,6 +2916,11 @@ func runPicker(
 			if event.err == nil && deathPause != nil && deathPause.ShouldScanResurrection() &&
 				isResurrectionPrompt(event.text) && event.foreground &&
 				deathPause.ObserveResurrectionPrompt(true) {
+				// The resurrection prompt can replace the original death dialog with
+				// a visually different Message box. From this verified frame onward,
+				// use the prompt itself as the dialog-presence fingerprint; otherwise
+				// the original dialog would look "cleared" and prematurely end OCR.
+				deathPause.RememberDeathDialog(event.dialogMask)
 				sent := false
 				method := "Enter"
 				if bot.PopupClickMethodEnabled() {
@@ -3281,7 +3346,16 @@ func runPicker(
 		lastDetectorRun =
 			time.Now()
 		chatEnabled, chatKeyword, chatYOffset := chatTextClick.Snapshot()
-		if chatEnabled && strings.TrimSpace(chatKeyword) != "" && !chatTextOCRBusy && time.Since(lastChatTextScanAt) >= 700*time.Millisecond {
+		forceChatTextRecheck := chatTextRecheckPending != nil
+		if chatEnabled && strings.TrimSpace(chatKeyword) != "" && !chatTextOCRBusy &&
+			(forceChatTextRecheck || time.Since(lastChatTextScanAt) >= 700*time.Millisecond) {
+			var recheckResponse chan chatTextCharacterPoint
+			if forceChatTextRecheck {
+				chatKeyword = chatTextRecheckPending.keyword
+				chatYOffset = chatTextRecheckPending.yOffset
+				recheckResponse = chatTextRecheckPending.response
+				chatTextRecheckPending = nil
+			}
 			picked := LoadChatTextROI()
 			if picked.ROI.Selected {
 				roi := partyROIToFrame(picked.ROI, scaleX, scaleY, frameOriginX, frameOriginY)
@@ -3290,11 +3364,12 @@ func runPicker(
 				lastChatTextScanAt = time.Now()
 				if ok {
 					chatTextOCRBusy = true
-					go func(img image.Image, keyword string, yOffset int, roi ocrworker.PartyROIConfig, offsetX, offsetY, refW, refH, scanX, scanY, scanWidth, scanHeight, frameWidth, frameHeight, originX, originY int, scaleX, scaleY float64) {
+					go func(img image.Image, keyword string, yOffset int, roi ocrworker.PartyROIConfig, offsetX, offsetY, refW, refH, scanX, scanY, scanWidth, scanHeight, frameWidth, frameHeight, originX, originY int, scaleX, scaleY float64, recheckResponse chan chatTextCharacterPoint) {
 						match, recognizedText, err := chatTextOCR.FindTextBoxDetailed(img, keyword)
 						event := chatTextEvent{
 							keyword: keyword, yOffset: yOffset, match: match, recognizedText: recognizedText, err: err,
-							referenceWidth: refW, referenceHeight: refH,
+							recheckResponse: recheckResponse,
+							referenceWidth:  refW, referenceHeight: refH,
 							scanX: scanX, scanY: scanY, scanWidth: scanWidth, scanHeight: scanHeight,
 							frameWidth: frameWidth, frameHeight: frameHeight, scaleX: scaleX, scaleY: scaleY,
 							originX: originX, originY: originY, offsetX: offsetX, offsetY: offsetY,
@@ -3323,7 +3398,7 @@ func runPicker(
 						case <-stopCh:
 						}
 					}(img, chatKeyword, chatYOffset, picked.ROI, captureOffsetX, captureOffsetY, picked.ClientWidth, picked.ClientHeight,
-						scanX, scanY, roi.Width, roi.Height, reader.width, reader.height, frameOriginX, frameOriginY, scaleX, scaleY)
+						scanX, scanY, roi.Width, roi.Height, reader.width, reader.height, frameOriginX, frameOriginY, scaleX, scaleY, recheckResponse)
 				} else {
 					logChatTextDiagnostic("CHAT TEXT SCAN | capture failed | ROI=%d,%d %dx%d | Offset=%d,%d", roi.X, roi.Y, roi.Width, roi.Height, captureOffsetX, captureOffsetY)
 				}
@@ -3554,6 +3629,7 @@ func runPicker(
 							err:        err,
 							foreground: resurrectionDialogLooksForeground(img),
 							duration:   time.Since(started),
+							dialogMask: deathDialogMaskFromImage(img),
 						}
 						if result != nil {
 							event.text = result.Text

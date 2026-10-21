@@ -1463,6 +1463,16 @@ func (b *BotController) CastClickAction(name string, hwnd uintptr, x, y, refW, r
 // blocked while the game consumes that click. A transient character-click
 // failure is retried without releasing popupPending.
 func (b *BotController) CastClickAction2(hwnd uintptr, x1, y1, refW1, refH1, x2, y2, refW2, refH2 int) bool {
+	return b.CastClickAction2WithLocator(hwnd, x1, y1, refW1, refH1, func(<-chan struct{}) (int, int, int, int, bool) {
+		return x2, y2, refW2, refH2, true
+	})
+}
+
+// CastClickAction2WithLocator keeps Party mode isolated while a caller obtains
+// a fresh character point after the mode's activation delay. Chat bubbles move
+// with their character/camera, so using the coordinates from before this delay
+// can click empty terrain.
+func (b *BotController) CastClickAction2WithLocator(hwnd uintptr, x1, y1, refW1, refH1 int, locate func(<-chan struct{}) (int, int, int, int, bool)) bool {
 	if !b.IsRunning() || b.IsChatPaused() {
 		return false
 	}
@@ -1492,6 +1502,14 @@ func (b *BotController) CastClickAction2(hwnd uintptr, x1, y1, refW1, refH1, x2,
 	appendOCRLog("CHAT PARTY CLICK SENT | Saved=%d,%d | Reference=%dx%d | Waiting=%s for character click", x1, y1, refW1, refH1, partyInviteArmDelay)
 	if !waitForInputGap(stop, partyInviteArmDelay, true) {
 		appendOCRLog("CHAT CHARACTER CLICK CANCELED | Runtime stopped during Party activation delay")
+		return false
+	}
+	if locate == nil {
+		return false
+	}
+	x2, y2, refW2, refH2, located := locate(stop)
+	if !located {
+		appendOCRLog("CHAT CHARACTER CLICK CANCELED | Fresh character location was not found after Party activation")
 		return false
 	}
 

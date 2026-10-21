@@ -51,6 +51,12 @@ type AutoPotController struct {
 	tpMax     int
 	lastRead  time.Time
 
+	// Optional user-supplied maxima take precedence over the small HUD OCR.
+	// They allow the live coloured bars to provide the current percentage even
+	// when Tesseract confuses similar-looking digits in a full N/N value.
+	hpManualMax int
+	tpManualMax int
+
 	// A game HUD can render the current number unreliably over moving terrain
 	// while still reading its fixed maximum correctly (for example 6334/6334
 	// when the coloured bar is actually at 91%). Keep a short, separate
@@ -122,6 +128,14 @@ func (p *AutoPotController) Update(cfg WebBotConfig) {
 	tpClickAreaSet := tpClickArea.Selected
 	tpClickX := tpClickArea.X + tpClickArea.Width/2
 	tpClickY := tpClickArea.Y + tpClickArea.Height/2
+	hpManualMax := cfg.AutoPotHPManualMax
+	if hpManualMax <= 0 {
+		hpManualMax = 0
+	}
+	tpManualMax := cfg.AutoPotTPManualMax
+	if tpManualMax <= 0 {
+		tpManualMax = 0
+	}
 
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -141,6 +155,18 @@ func (p *AutoPotController) Update(cfg WebBotConfig) {
 	p.tp.Enabled, p.tp.Threshold, p.tp.SlotVK = cfg.AutoPotTPEnabled, cfg.AutoPotTPPercent, cfg.AutoPotTPSlotVK
 	p.tp.Click, p.tp.ClickAreaSet, p.tp.ClickX, p.tp.ClickY = tpClick, tpClickAreaSet, tpClickX, tpClickY
 	p.tp.ClickReferenceWidth, p.tp.ClickReferenceHeight = tpClickArea.ClientWidth, tpClickArea.ClientHeight
+	if p.hpManualMax != hpManualMax {
+		p.hpManualMax = hpManualMax
+		p.hpCurrent, p.hpMax = 0, hpManualMax
+		p.hpFullMaxCandidate, p.hpFullMaxCandidateScans = 0, 0
+		p.hpBarPercentScale, p.hpBarPercentScaleSet = 0, false
+	}
+	if p.tpManualMax != tpManualMax {
+		p.tpManualMax = tpManualMax
+		p.tpCurrent, p.tpMax = 0, tpManualMax
+		p.tpFullMaxCandidate, p.tpFullMaxCandidateScans = 0, 0
+		p.tpBarPercentScale, p.tpBarPercentScaleSet = 0, false
+	}
 }
 
 func (p *AutoPotController) IsAnyEnabled() bool {
@@ -179,14 +205,14 @@ func (p *AutoPotController) Observe(hpCurrent, hpMax, tpCurrent, tpMax int) []Au
 
 	events := make([]AutoPotEvent, 0, 2)
 	updated := false
-	if statusMaximumPlausible(p.hpMax, hpMax) {
+	if p.hpManualMax == 0 && statusMaximumPlausible(p.hpMax, hpMax) {
 		p.hpCurrent, p.hpMax = hpCurrent, hpMax
 		updated = true
 		if event, ok := p.observeRule("HP", &p.hp, hpCurrent, hpMax); ok {
 			events = append(events, event)
 		}
 	}
-	if statusMaximumPlausible(p.tpMax, tpMax) {
+	if p.tpManualMax == 0 && statusMaximumPlausible(p.tpMax, tpMax) {
 		p.tpCurrent, p.tpMax = tpCurrent, tpMax
 		updated = true
 		if event, ok := p.observeRule("TP", &p.tp, tpCurrent, tpMax); ok {
@@ -272,14 +298,18 @@ func (p *AutoPotController) CalibrateBarPercents(
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	p.hpBarPercentScale, p.hpBarPercentScaleSet = calibrateStatusBarScale(
-		p.hpBarPercentScale, p.hpBarPercentScaleSet,
-		hpCurrent, hpMax, hpPercent, hpOK,
-	)
-	p.tpBarPercentScale, p.tpBarPercentScaleSet = calibrateStatusBarScale(
-		p.tpBarPercentScale, p.tpBarPercentScaleSet,
-		tpCurrent, tpMax, tpPercent, tpOK,
-	)
+	if p.hpManualMax == 0 {
+		p.hpBarPercentScale, p.hpBarPercentScaleSet = calibrateStatusBarScale(
+			p.hpBarPercentScale, p.hpBarPercentScaleSet,
+			hpCurrent, hpMax, hpPercent, hpOK,
+		)
+	}
+	if p.tpManualMax == 0 {
+		p.tpBarPercentScale, p.tpBarPercentScaleSet = calibrateStatusBarScale(
+			p.tpBarPercentScale, p.tpBarPercentScaleSet,
+			tpCurrent, tpMax, tpPercent, tpOK,
+		)
+	}
 }
 
 func calibrateStatusBarScale(
@@ -326,8 +356,8 @@ func (p *AutoPotController) ResetStatus() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	p.hpCurrent, p.hpMax = 0, 0
-	p.tpCurrent, p.tpMax = 0, 0
+	p.hpCurrent, p.hpMax = 0, p.hpManualMax
+	p.tpCurrent, p.tpMax = 0, p.tpManualMax
 	p.hpFullMaxCandidate, p.hpFullMaxCandidateScans = 0, 0
 	p.tpFullMaxCandidate, p.tpFullMaxCandidateScans = 0, 0
 	p.lastRead = time.Time{}
@@ -351,20 +381,24 @@ func (p *AutoPotController) LearnFullStatusMaximums(
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	hpLearned = learnFullStatusMaximum(
-		&p.hpMax,
-		&p.hpFullMaxCandidate,
-		&p.hpFullMaxCandidateScans,
-		hpCurrent,
-		hpMaximum,
-	)
-	tpLearned = learnFullStatusMaximum(
-		&p.tpMax,
-		&p.tpFullMaxCandidate,
-		&p.tpFullMaxCandidateScans,
-		tpCurrent,
-		tpMaximum,
-	)
+	if p.hpManualMax == 0 {
+		hpLearned = learnFullStatusMaximum(
+			&p.hpMax,
+			&p.hpFullMaxCandidate,
+			&p.hpFullMaxCandidateScans,
+			hpCurrent,
+			hpMaximum,
+		)
+	}
+	if p.tpManualMax == 0 {
+		tpLearned = learnFullStatusMaximum(
+			&p.tpMax,
+			&p.tpFullMaxCandidate,
+			&p.tpFullMaxCandidateScans,
+			tpCurrent,
+			tpMaximum,
+		)
+	}
 	if hpLearned || tpLearned {
 		p.lastRead = time.Now()
 	}
